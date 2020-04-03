@@ -1,0 +1,2 @@
+class DatasetId(str):
+    pass
