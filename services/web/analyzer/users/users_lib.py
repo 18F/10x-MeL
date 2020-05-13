@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Union
 from pathlib import Path
 import logging
 
@@ -103,9 +103,9 @@ class UserHandler(SerializableHandler):
     def by_id(self, user_id: UserId) -> Optional[User]:
         return self._by_id.get(user_id)
 
-    def get_last_dataset_id(self, user: User) -> Optional[DatasetId]:
-        return self._history.get(user.id)
+    def get_last_dataset_id(self, user_id: UserId) -> Optional[DatasetId]:
+        return self._history.get(user_id)
 
-    def set_last_dataset(self, user: User, dataset: Dataset):
-        self._history[user.id] = dataset.id
+    def set_last_dataset(self, user_id: UserId, dataset_id: DatasetId):
+        self._history[user_id] = dataset_id
         self.save()

@@ -1,10 +1,13 @@
 from pathlib import Path
-from typing import List
+from typing import Dict, List, Optional
+import json
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
-from analyzer.session import Session
+from analyzer.session import (
+    Session, UserId, DatasetId, DataViewId, TransformList,
+)
 
 import logging
 from logging.handlers import RotatingFileHandler
@@ -22,6 +25,8 @@ DATA_VIEWS_FILENAME = "data_views.json"
 USERS_FILENAME = "users.json"
 DATASETS_FILENAME = "datasets.json"
 DATA_VIEW_HISTORY_FILENAME = "data_view_history.json"
+
+PAYLOAD_KEY = "q"
 
 INDEX_FILENAME = "index.html"
 
@@ -52,13 +57,28 @@ session = Session(
     data_view_history_filename=DATA_VIEW_HISTORY_FILENAME,
 )
 
+
 app = Flask(__name__, static_folder="static")
 CORS(app)
+
+
+def extract_payload() -> Optional[Dict]:
+    json_payload = request.args.get(PAYLOAD_KEY)
+    try:
+        return json.loads(json_payload)
+    except json.JSONDecodeError as exc:
+        log.error("%s: could not decode payload: %s", exc, json_payload)
+        return None
 
 
 @app.route("/")
 def index():
     return app.send_static_file(INDEX_FILENAME)
+
+
+@app.route("/heartbeat")
+def ping():
+    return "heartbeat"
 
 
 @app.route("/list_datasets")
@@ -81,19 +101,34 @@ def show_data_dir() -> str:
     )
 
 
-@app.route("/list_data_views_for_active_user")
-def list_data_views_for_active_user() -> str:
-    """The DataViews associated with the active User"""
-    data_views = session.data_views_for_active_user()
+@app.route("/most_recent_data_view", methods=["GET"])
+def most_recent_data_view() -> str:
+    key_user_id = "user_id"
+    key_dataset_id = "dataset_id"
+    payload = extract_payload()
 
-    return jsonify([data_view.serialize() for data_view in data_views])
+    user_id_str = payload.get(key_user_id, None)
 
+    if not user_id_str:
+        return jsonify(
+            dict(error=1, msg=f'user_id must be specified, found "{user_id_str}"')
+        )
 
-@app.route("/list_data_views_for_active_user_and_dataset")
-def list_data_views_for_active_user_and_dataset() -> str:
-    """The DataViews associated with the active User and active Dataset"""
-    data_views = session.data_views_for_active_user(active_dataset=True)
-    return jsonify([data_view.serialize() for data_view in data_views])
+    user_id = UserId(user_id_str)
+    dataset_id_str = payload.get(key_dataset_id, None)
+
+    try:
+        if not dataset_id_str:
+            data_view = session.get_most_recent_data_view(user_id=user_id)
+        else:
+            data_view = session.get_most_recent_data_view(
+                user_id=user_id,
+                dataset_id=DatasetId(dataset_id_str)
+            )
+
+        return jsonify(dict(error=0, data_view=data_view.serialize()))
+    except ValueError as exc:
+        return jsonify(dict(error=1, data_view=None, msg=str(exc)))
 
 
 @app.route("/list_users")
@@ -114,63 +149,139 @@ def show_datasets() -> str:
     )
 
 
-@app.route("/active_dataset", methods=["GET"])
-def active_dataset() -> str:
-    # capture the filename of a new dataset, if provided
-    new_dataset_key = "new_dataset"
+@app.route("/set_most_recent_dataset", methods=["GET"])
+def set_most_recent_dataset() -> str:
+    key_user_id = "user_id"
+    key_filename = "filename"
 
-    if new_dataset_key in request.args:
-        new_dataset = request.args.get("new_dataset", "")
-        session.active_dataset = new_dataset
-        log.info("setting active dataset to %s", new_dataset)
+    payload = extract_payload()
 
-    if session.active_dataset:
-        filename = session.active_dataset.filename
-    else:
-        filename = ""
+    user_id_str = payload.get(key_user_id, None)
+    filename = payload.get(key_filename, "").strip()
 
-    return jsonify({"active_dataset": filename})
+    if not user_id_str:
+        return jsonify(dict(error=1, msg="no user_id specified"))
+    if not filename:
+        return jsonify(dict(error=2, msg="no filename specified"))
 
-
-@app.route("/active_user_id", methods=["GET"])
-def active_user_id() -> str:
-    log.info("Session user_id = %s", session.active_user.id)
-    return jsonify({"user_id": session.active_user.id})
-
-
-@app.route("/active_data_view")
-def active_data_view() -> str:
-    data_view = session.active_data_view
-    if data_view:
-        return jsonify(data_view.serialize())
-    else:
-        return jsonify({})
-
-
-@app.route("/refresh_data_views")
-def refresh_data_views():
-    session.refresh_data_views()
-    return active_data_view()
-
-
-@app.route("/get_labels_from_active_dataset", methods=["GET"])
-def get_labels_from_active_dataset():
-    default_label_type = "original"
-    label_type = request.args.get("type", default_label_type)
+    user_id = UserId(user_id_str)
 
     try:
-        labels = session.get_labels_from_active_dataset(label_type)
-        return jsonify(labels.serialize())
-
-    except Exception as exc:
-        log.error(exc)
-        return jsonify([])
+        dataset = session.set_most_recent_dataset(user_id, filename)
+        return jsonify(dict(dataset=dataset.serialize(), user_id=user_id))
+    except ValueError as exc:
+        return jsonify(dict(error=3, msg=str(exc), dataset=None, user_id=user_id))
 
 
-@app.route("/get_data_from_active_dataset")
-def get_data_from_active_dataset():
-    labels, entries = session.get_data_from_active_dataset()
-    return jsonify(dict(labels=labels.serialize(), entries=entries))
+@app.route("/raw_data_for_data_view")
+def raw_data_for_data_view():
+    key_data_view_id = "data_view_id"
+    try:
+        payload = extract_payload()
+        data_view_id = DataViewId(payload[key_data_view_id])
+        entries = session.raw_data_for_data_view(data_view_id)
+        return jsonify(dict(entries=entries))
+    except ValueError as exc:
+        return jsonify(dict(error=1, msg=str(exc), entries=-1))
+
+
+@app.route("/get_constraint_defs")
+def get_constraint_defs():
+    return jsonify([c.serialize() for c in session.get_constraint_defs()])
+
+
+@app.route("/transform_data_view", methods=["GET"])
+def transform_data_view():
+    key_data_view_id = "data_view_id"
+    key_add_transforms = "add_transforms"
+    key_del_transforms = "del_transforms"
+
+    payload = extract_payload()
+
+    try:
+        add_transforms = TransformList.deserialize(payload[key_add_transforms])
+        del_transforms = TransformList.deserialize(payload[key_del_transforms])
+        data_view_id = DataViewId(payload[key_data_view_id])
+
+        data_view = session.transform_data_view(data_view_id, add_transforms, del_transforms)
+        data_view_id = data_view.id
+
+        return jsonify(
+            dict(
+                data_view_id=data_view_id,
+                data_view=data_view.serialize(),
+                error=0,
+                msg="",
+            )
+        )
+    except ValueError as exc:
+        return jsonify(
+            dict(
+                data_view_id=-1,
+                data_view=-1,
+                error=1,
+                msg=str(exc),
+            )
+        )
+
+
+@app.route("/count_unique", methods=["GET"])
+def count_unique():
+    key_column = "column"
+    key_data_view_id = "data_view_id"
+
+    payload = extract_payload()
+
+    column_name = payload[key_column]
+    data_view_id = payload[key_data_view_id]
+
+    log.info(f"column_name {column_name} data_view_id {data_view_id}")
+
+    response = session.count_uniques(column_name, data_view_id)
+
+    return jsonify(response.serialize())
+
+
+@app.route("/tf_idf_over_values", methods=["GET"])
+def tf_idf_over_values():
+    key_text_column = "text_column"
+    key_category_column = "category_column"
+    key_data_view_id = "data_view_id"
+
+    payload = extract_payload()
+
+    text_column_name = payload[key_text_column]
+    category_column_name = payload[key_category_column]
+    data_view_id = payload[key_data_view_id]
+
+    response = session.tf_idf_over_values(
+        text_column_name=text_column_name,
+        category_column_name=category_column_name,
+        data_view_id=data_view_id,
+    )
+
+    return jsonify(response.serialize())
+
+
+@app.route("/word_counts_over_time", methods=["GET"])
+def word_counts_over_time():
+    key_text_column = "text_column"
+    key_date_time_column = "date_time_column"
+    key_data_view_id = "data_view_id"
+
+    payload = extract_payload()
+
+    text_column_name = payload[key_text_column]
+    date_time_column_name = payload[key_date_time_column]
+    data_view_id = payload[key_data_view_id]
+
+    response = session.word_counts_over_time(
+        text_column_name=text_column_name,
+        date_time_column_name=date_time_column_name,
+        data_view_id=data_view_id,
+    )
+
+    return jsonify(response.serialize())
 
 
 @app.route("/hello_world")

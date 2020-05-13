@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Tuple, Optional, Union
-
+from typing import List, Optional, Union
+from time import time
 import logging
 
-from analyzer.analyzer_lib import Analyzer, DataFrame
+from analyzer.analyzer_lib import Analyzer
+from analyzer.constraint_lib import constraint_manager, ConstraintDef
+from analyzer.query_processor_lib import QueryResponse, QueryErrorResponse
 from analyzer.dataset.dataset_lib import Dataset, DatasetId
 from analyzer.dataset.handler import DatasetHandler
-from analyzer.data_view.data_view_lib import DataView, DataViewId, LabelSet, LabelType
+from analyzer.data_view.data_view_lib import (
+    DataView, DataViewId, LabelSet, TransformList,
+)
 from analyzer.data_view.handler import DataViewHandler, DataViewHistoryHandler
 from analyzer.data_view.rich_data_view import RichDataView
 from analyzer.users.users_lib import User, UserHandler, UserId
@@ -17,7 +21,11 @@ from analyzer.users.users_lib import User, UserHandler, UserId
 log = logging.getLogger(__name__)
 
 
-class InvalidLabelTypeException(Exception):
+class InvalidLabelTypeException(ValueError):
+    pass
+
+
+class UserHasNoAssociatedDatasetsException(ValueError):
     pass
 
 
@@ -48,170 +56,192 @@ class Session:
         self.data_view_handler = DataViewHandler(data_views_path)
         self.data_view_history_handler = DataViewHistoryHandler(data_view_history_path)
 
-        self._analyzer = Analyzer(data_dir=self.data_dir)
+        self._analyzer = Analyzer(
+            data_dir=self.data_dir,
+            user_handler=self.user_handler,
+            dataset_handler=self.dataset_handler,
+            data_view_handler=self.data_view_handler,
+        )
 
         user = self.user_handler.default_user
-        dataset_id = self.user_handler.get_last_dataset_id(user)
+        dataset_id = self.user_handler.get_last_dataset_id(user.id)
 
         if dataset_id:
             data_view_id = self.data_view_history_handler.get(user.id, dataset_id)
         else:
             data_view_id = None
 
-        self.active_user_id: UserId = user.id
-        self.active_dataset_id: DatasetId = dataset_id
-        self.active_data_view_id: DataViewId = data_view_id
-
-    @property
-    def active_user(self) -> User:
-        """Obtain the active User"""
-        user_id = self.active_user_id
-        if not user_id:
-            user = self.user_handler.default_user
+        if data_view_id:
+            log.info("warming up data frame")
+            start_time = time()
+            self._analyzer.active_dataframe(self.rich_data_view(data_view_id))
+            log.info("done: %s", time() - start_time)
         else:
-            user = self.user_handler.by_id(user_id)
-            if user is None:
-                log.error("User %s could not be found, loading default User", user_id)
-                user = self.user_handler.default_user
-        return user
+            log.info("DataView ID is %s", data_view_id)
 
-    @property
-    def active_dataset(self) -> Dataset:
-        """Obtain the active Dataset"""
-        return self.dataset_handler.by_id(self.active_dataset_id)
+    def get_most_recent_dataset_id(self, user: Union[User, UserId]) -> DatasetId:
+        return self.user_handler.get_last_dataset_id(user.id)
 
-    @active_dataset.setter
-    def active_dataset(self, filename: str):
+    def get_most_recent_dataset(self, user: Union[User, UserId]) -> Dataset:
+        return self.dataset_handler.by_id(
+            self.user_handler.get_last_dataset_id(user.id)
+        )
+
+    def set_most_recent_dataset(self, user_id: UserId, filename: str) -> Optional[Dataset]:
         """Set the active dataset to the specified filename"""
         if not filename:
-            log.error("Attempting to set dataset to empty filename: %s", filename)
+            log.error('Attempting to load dataset with empty filename: "%s"', filename)
             return
 
-        active_dataset = self.dataset_handler.by_id(self.active_dataset_id)
-
-        if active_dataset and filename == active_dataset.filename:
-            # this dataset is already loaded, so do nothing
-            return
-
-        if self.dataset_handler.has_filename(filename):
-            log.info("Changing dataset file to %s", filename)
-            dataset = self.dataset_handler.by_filename(filename)
-        else:
+        # has this filename already been recorded?
+        if not self.dataset_handler.has_filename(filename):
+            # if not, create a Dataset for the new filename
             log.info("Creating new dataset: %s", filename)
             dataset = self.dataset_handler.create(filename)
-
-        self.user_handler.set_last_dataset(self.active_user, dataset)
-
-        self.active_dataset_id = dataset.id
-        self.active_data_view_id = None
-
-    @property
-    def active_data_view(self) -> Optional[RichDataView]:
-        """Obtain the active DataView for the active Dataset"""
-        if not self.active_dataset:
-            log.info("DataView could not be loaded: no active Dataset")
-            return None
-
-        user = self.active_user
-        dataset = self.active_dataset
-        dataset_id = dataset.id
-
-        # is a DataView active?
-        if not self.active_data_view_id:
-            # if not, does this user/dataset pair have a DataView in the history?
-            if self.data_view_history_handler.has(user.id, dataset.id):
-                # if so, use it
-                data_view_id = self.data_view_history_handler.get(user.id, dataset.id)
-                data_view = self.data_view_handler.by_id(data_view_id)
-                log.info("Loaded DataView %s for %s / %s", data_view_id, user, dataset)
-
-            else:
-                # if not, search all DataViews to a match exists at all
-                data_view = self.data_view_handler.find_first(user.id, dataset_id)
-
-                # if a DataView wasn't found, create one for this user/dataset pair
-                if not data_view:
-                    # if not, create a DataView for this user/dataset pair
-                    labels = self._analyzer.get_dataset_labels(dataset)
-                    data_view = self.data_view_handler.create(user, dataset, labels)
-
-                    self.data_view_history_handler.set(user.id, dataset.id, data_view.id)
-                    self.data_view_history_handler.save()
-                    log.info("Created DataView %s for %s / %s", data_view.id, user, dataset)
-
-            self.active_data_view_id = data_view.id
         else:
-            data_view = self.data_view_handler.by_id(self.active_data_view_id)
+            # if so, load the Dataset associated with this filename
+            dataset = self.dataset_handler.by_filename(filename)
 
-        log.info(
-            "Active ID: %s, DataView: %s Dataset: %s",
-            self.active_data_view_id,
-            data_view,
-            self.active_dataset,
-        )
+        self.user_handler.set_last_dataset(user_id, dataset.id)
+        return dataset
 
+    def rich_data_view(self, data_view_id: DataViewId) -> RichDataView:
+        data_view = self.data_view_handler.by_id(data_view_id)
+        log.info("DataView %s from %s", data_view, data_view_id)
         return RichDataView(
             data_view=data_view,
-            dataset=self.active_dataset,
-            user=self.active_user,
+            dataset=self.dataset_handler.by_id(data_view.dataset_id),
+            user=self.user_handler.by_id(data_view.user_id),
         )
-
-    def data_views_for_active_user(self, active_dataset: bool = False) -> List[DataView]:
-        user_id = self.active_user_id
-        if active_dataset:
-            dataset_id = self.active_dataset_id
-            return self.data_view_handler.find(user_id=user_id, dataset_id=dataset_id)
-        else:
-            return self.data_view_handler.find(user_id=user_id)
 
     def refresh_data_views(self):
         self.data_view_handler.load()
 
-    @property
-    def dataset_path(self) -> Path:
-        """Obtain the path to the active dataset"""
-        return Path(self.data_dir, self.active_dataset.filename)
+    @classmethod
+    def get_constraint_defs(cls) -> List[ConstraintDef]:
+        return list(constraint_manager.get_constraint_defs())
 
-    @property
-    def active_labels(self) -> LabelSet:
-        labels = self.active_data_view.labels
+    def get_most_recent_data_view(
+        self,
+        user_id: UserId,
+        dataset_id: Optional[DatasetId] = None,
+    ) -> DataView:
+        # if no dataset id is supplied, then look up the user's most recently used dataset
+        if dataset_id is None:
+            dataset_id = self.user_handler.get_last_dataset_id(user_id)
+
+        if dataset_id is None:
+            raise UserHasNoAssociatedDatasetsException(
+                f"user {user_id} has no associated datasets (likely the user's first session)"
+            )
+
+        if self.data_view_history_handler.has(user_id, dataset_id):
+            data_view_id = self.data_view_history_handler.get(user_id, dataset_id)
+            data_view = self.data_view_handler.by_id(data_view_id)
+            if data_view:
+                return data_view
+
+        return self.create_data_view(
+            parent=None,
+            user_id=user_id,
+            dataset_id=dataset_id,
+            labels=self._analyzer.get_dataset_labels(
+                self.dataset_handler.by_id(dataset_id)
+            ),
+        )
+
+    def create_data_view(
+        self,
+        parent: Optional[DataViewId],
+        user_id: UserId,
+        dataset_id: DatasetId,
+        labels: Optional[LabelSet] = None,
+        transforms: Optional[TransformList] = None,
+    ) -> DataView:
         if not labels:
-            labels = self.get_labels_from_active_dataset(LabelType.ORIGINAL)
-        return labels
+            labels = self._analyzer.get_dataset_labels(
+                self.dataset_handler.by_id(dataset_id)
+            )
 
-    def get_labels_from_active_dataset(self, label_type: LabelType) -> LabelSet:
-        try:
-            label_type = LabelType(label_type)
-        except ValueError:
-            raise InvalidLabelTypeException(label_type)
+        data_view = self.data_view_handler.create(
+            parent=parent,
+            user=user_id,
+            dataset=dataset_id,
+            labels=labels,
+            transforms=transforms,
+        )
 
-        if not self.active_dataset:
-            log.error("No active dataset")
-            return LabelSet()
+        self.data_view_history_handler.set(user_id, dataset_id, data_view.id)
 
-        if label_type == LabelType.ACTIVE:
-            return self.active_data_view.labels
+        return data_view
 
-        elif label_type == LabelType.ORIGINAL:
-            return self._analyzer.get_dataset_labels(self.active_dataset)
+    def count_uniques(self, column_name: str, data_view_id: DataViewId) -> QueryResponse:
+        data_view = self.rich_data_view(data_view_id)
+        if not data_view:
+            return QueryErrorResponse("No active DataView")
 
-        elif label_type == LabelType.DERIVED:
-            raise NotImplementedError("derived labels not yet implemented")
+        counts = self._analyzer.unique_counts_by_column(
+            column=column_name, data_view=data_view,
+        )
 
-        elif label_type == LabelType.ALL:
-            raise NotImplementedError("derived labels not yet implemented")
+        return QueryResponse(data=counts)
 
-    def get_data_from_active_dataset(
-        self, limit: Optional[int] = None
-    ) -> Tuple[LabelSet, Union[DataFrame, List]]:
+    def tf_idf_over_values(
+        self,
+        text_column_name: str,
+        category_column_name: str,
+        data_view_id: DataViewId,
+        count: int = 20,
+    ) -> QueryResponse:
+        data_view = self.rich_data_view(data_view_id)
+        if not data_view:
+            return QueryErrorResponse("No active DataView")
 
-        if not self.active_dataset:
-            log.warning("No active dataset")
-            return LabelSet(), []
+        scores = self._analyzer.tf_idf_over_values(
+            text_column_name=text_column_name,
+            category_column_name=category_column_name,
+            data_view=data_view,
+            count=count,
+        )
 
-        log.info("active dataset: %s, path: %s", self.active_dataset, self.dataset_path)
+        return QueryResponse(data=scores)
 
-        entries = self._analyzer.get_entries(self.active_data_view, limit=limit)
-        labels = self.active_labels
+    def word_counts_over_time(
+        self,
+        text_column_name: str,
+        date_time_column_name: str,
+        data_view_id: DataViewId,
+    ) -> QueryResponse:
+        data_view = self.rich_data_view(data_view_id)
 
-        return labels, entries or []
+        if not data_view:
+            return QueryErrorResponse("No active DataView")
+
+        historical_counts = self._analyzer.word_counts_over_time(
+            date_time_column_name=date_time_column_name,
+            text_column_name=text_column_name,
+            data_view=data_view,
+        )
+
+        return QueryResponse(data=historical_counts)
+
+    def raw_data_for_data_view(self, data_view_id: DataViewId):
+        return self._analyzer.raw_data_for_data_view(
+            self.rich_data_view(data_view_id)
+        )
+
+    def transform_data_view(
+        self,
+        data_view_id: DataViewId,
+        add_transforms: TransformList,
+        del_transforms: TransformList,
+    ) -> DataView:
+        transformed_data_view = self.data_view_handler.transform_data_view(
+            data_view_id, add_transforms, del_transforms,
+        )
+        self.data_view_history_handler.set(
+            transformed_data_view.user_id,
+            transformed_data_view.dataset_id,
+            transformed_data_view.id,
+        )
+        return transformed_data_view
