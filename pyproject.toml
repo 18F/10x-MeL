@@ -13,6 +13,8 @@ xlrd = "1.2.0"
 flask_cors = "1.10.2"
 black = "19.10b0"
 pytest = "5.4.1"
+nltk = "3.5"
+scikit-learn = "^0.22"
 
 [tool.poetry.dev-dependencies]
 

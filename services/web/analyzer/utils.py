@@ -12,7 +12,7 @@ log = logging.getLogger(__name__)
 SerializableType = Union[str, float, List, Dict]
 
 
-class Serializable(metaclass=ABCMeta):
+class Serializable:
     def serialize(self) -> SerializableType:
         raise NotImplementedError()
 

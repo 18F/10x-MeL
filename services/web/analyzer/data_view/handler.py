@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Union
 from pathlib import Path
+import json
 import logging
 
-from analyzer.data_view.data_view_lib import DataView, DataViewId, Label, LabelSet
+from analyzer.data_view.data_view_lib import (
+    DataView, DataViewId, Label, LabelSet, TransformList,
+)
 from analyzer.dataset.dataset_lib import Dataset, DatasetId
 from analyzer.users.users_lib import User, UserId
 
@@ -78,6 +81,13 @@ class DataViewHistoryHandler(SerializableHandler):
             return
         self._save(self._path)
 
+    def keys(self):
+        return self._data_view_history.keys()
+
+    @classmethod
+    def make_key(cls, user_id: UserId, dataset_id: DatasetId) -> HistoryKey:
+        return HistoryKey(user_id, dataset_id)
+
     def has_key(self, key: HistoryKey) -> bool:
         return key in self._data_view_history
 
@@ -112,6 +122,8 @@ class DataViewHandler(SerializableHandler):
 
         self._label_by_name_by_data_view: Dict[DataView, Dict[str, Label]] = {}
 
+        self._data_view_id_by_serialization: Dict[str, DataViewId] = {}
+
         self.load()
 
     def serialize(self) -> List:
@@ -143,16 +155,46 @@ class DataViewHandler(SerializableHandler):
             return
         self._save(self._path)
 
-    def create(self, user: User, dataset: Dataset, labels: LabelSet) -> DataView:
+    def create(
+        self,
+        parent: Optional[Union[DataView, DataViewId]],
+        user: Union[User, UserId],
+        dataset: Union[Dataset, DatasetId],
+        labels: LabelSet,
+        transforms: Optional[TransformList] = None,
+    ) -> DataView:
+        log.debug("DataViewHandler.create")
+
+        try:
+            parent_id = parent.id
+        except AttributeError:
+            parent_id = parent
+
+        try:
+            dataset_id = dataset.id
+        except AttributeError:
+            dataset_id = dataset
+
+        try:
+            user_id = user.id
+        except AttributeError:
+            user_id = user
+
+        if not transforms:
+            transforms = TransformList()
+
         data_view = DataView(
             data_view_id=DataViewId(self._next_id),
-            dataset_id=dataset.id,
-            user_id=user.id,
+            parent_data_view_id=parent_id,
+            dataset_id=dataset_id,
+            user_id=user_id,
             labels=labels,
+            transforms=transforms,
         )
 
         self._data_views.append(data_view)
         self._index_data_view(data_view)
+
         log.info("saving new DataView: %s", data_view.id)
         self.save()
 
@@ -163,7 +205,20 @@ class DataViewHandler(SerializableHandler):
         return 1 + max((int(data_view.id) for data_view in self._data_views), default=0)
 
     def _index_data_view(self, data_view: DataView):
-        self._data_view_by_id[data_view.id] = data_view
+        data_view_id = data_view.id
+
+        self._data_view_by_id[data_view_id] = data_view
+
+        serialization = self._serialize_for_cache(
+            dataset_id=data_view.dataset_id,
+            transforms=data_view.transforms,
+        )
+        self._data_view_id_by_serialization[serialization] = data_view.id
+
+    @classmethod
+    def _serialize_for_cache(cls, dataset_id: DatasetId, transforms: TransformList) -> str:
+        serialized_transforms = transforms.serialize() if transforms else []
+        return json.dumps([dataset_id, serialized_transforms])
 
     @property
     def data_views(self) -> List[DataView]:
@@ -203,3 +258,52 @@ class DataViewHandler(SerializableHandler):
             return self._label_by_name_by_data_view.get(data_view).get(name)
         except KeyError:
             return Label(name=name)
+
+    def transform_data_view(
+        self,
+        data_view_id: DataViewId,
+        add_transforms: Optional[TransformList] = None,
+        del_transforms: Optional[TransformList] = None,
+        labels: Optional[LabelSet] = None,
+    ) -> DataView:
+        data_view = self.by_id(data_view_id)
+
+        if data_view is None:
+            raise ValueError(f"Could not find DataView for id {data_view_id}")
+
+        augmented_transforms = TransformList(data_view.transforms)
+
+        if del_transforms:
+            for del_transform in del_transforms:
+                for transform in augmented_transforms:
+                    if del_transform.serialize() == transform.serialize():
+                        augmented_transforms.remove(transform)
+                        log.info("removing %s", transform)
+                        break
+                else:
+                    log.error(
+                        "Failed to remove %s from %s", del_transform, augmented_transforms,
+                    )
+
+        if add_transforms:
+            augmented_transforms.extend(add_transforms)
+
+        # see if this DataView already exists
+        serialization = self._serialize_for_cache(
+            data_view.dataset_id,
+            augmented_transforms,
+        )
+
+        existing_id = self._data_view_id_by_serialization.get(serialization, None)
+        if existing_id:
+            log.info(f"using cached DataView {existing_id}")
+            return self.by_id(existing_id)
+
+        log.info("saving new DataView")
+        return self.create(
+            parent=data_view_id,
+            user=data_view.user_id,
+            dataset=data_view.dataset_id,
+            labels=labels or data_view.labels,
+            transforms=augmented_transforms,
+        )

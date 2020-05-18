@@ -8,6 +8,7 @@ from analyzer.utils import Serializable
 from analyzer.data_view import DataViewId
 from analyzer.dataset.dataset_lib import DatasetId
 from analyzer.users.users_lib import UserId
+from analyzer.constraint_lib import TransformList
 
 
 log = logging.getLogger(__name__)
@@ -79,12 +80,26 @@ class Label(Serializable):
             name=self._name, props=" ".join(str(p) for p in props)
         )
 
+    def __eq__(self, other) -> bool:
+        try:
+            if all(
+                [
+                    self._name == other.name,
+                    self._width == other.width,
+                    self._font_size == other.font_size,
+                ]
+            ):
+                return True
+        except AttributeError:
+            pass
+        return False
+
 
 class LabelSet(Serializable, list):
     def __init__(self, labels: Optional[List[Label]] = None):
         super().__init__(labels or [])
 
-    def serialize(self) -> List[List[str]]:
+    def serialize(self) -> List[Dict[Union[str, int]]]:
         return [label.serialize() for label in self]
 
     @classmethod
@@ -96,34 +111,57 @@ class LabelSet(Serializable, list):
 
 
 class DataView(Serializable):
+    KEY_ID = "id"
+    KEY_PARENT_ID = "parent_id"
+    KEY_DATASET_ID = "dataset_id"
+    KEY_USER_ID = "user_id"
+    KEY_COLUMN_LABELS = "column_labels"
+    KEY_TRANSFORMS = "transforms"
+
     def __init__(
         self,
         data_view_id: DataViewId,
+        parent_data_view_id: DataViewId,
         dataset_id: DatasetId,
         user_id: UserId,
         labels: Optional[LabelSet] = None,
+        transforms: Optional[TransformList] = None,
     ):
         self.id = data_view_id
+        self.parent_id = parent_data_view_id
         self.dataset_id = dataset_id
         self.user_id = user_id
-        self.labels = labels or []
+        self.labels = labels or LabelSet()
+        self.transforms = transforms or TransformList()
 
-    def serialize(self) -> List[str]:
+    def serialize(self) -> Dict[str, str]:
         labels = self.labels.serialize() if self.labels else LabelSet()
-        return [
-            self.id,
-            self.dataset_id,
-            self.user_id,
-            labels,
-        ]
+        transforms = self.transforms.serialize() if self.transforms else TransformList()
+        return {
+            self.KEY_ID: self.id,
+            self.KEY_PARENT_ID: self.parent_id,
+            self.KEY_DATASET_ID: self.dataset_id,
+            self.KEY_USER_ID: self.user_id,
+            self.KEY_COLUMN_LABELS: labels,
+            self.KEY_TRANSFORMS: transforms,
+        }
 
     @classmethod
-    def deserialize(cls, lst: List) -> DataView:
+    def deserialize(cls, d: Dict[str]) -> DataView:
+        data_view_id = DataViewId(d[cls.KEY_ID])
+        parent_data_view_id = DataViewId(d[cls.KEY_PARENT_ID])
+        dataset_id = DatasetId(d[cls.KEY_DATASET_ID])
+        user_id = UserId(d[cls.KEY_USER_ID])
+        labels = LabelSet.deserialize(d[cls.KEY_COLUMN_LABELS])
+        transforms = TransformList.deserialize(d[cls.KEY_TRANSFORMS])
+
         return DataView(
-            data_view_id=lst[0],
-            dataset_id=lst[1],
-            user_id=lst[2],
-            labels=LabelSet.deserialize(lst[3]),
+            data_view_id=data_view_id,
+            parent_data_view_id=parent_data_view_id,
+            dataset_id=dataset_id,
+            user_id=user_id,
+            labels=labels,
+            transforms=transforms,
         )
 
     def __repr__(self) -> str:

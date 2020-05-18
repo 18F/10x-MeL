@@ -50,25 +50,25 @@ class StringConcatenatedColumn(BaseDerivedColumn):
             optional=["sep"],
         )
 
-    def apply(self, name: str, data_frame: DataFrame, sep: Optional[str] = " "):
+    def apply(self, name: str, df: DataFrame, sep: Optional[str] = " "):
         column_labels = self.column_labels
 
         # choosing a character that will never occur in input
         null_sep = "\x01"
 
-        data_frame[name] = data_frame[column_labels[0]].astype(str).str.strip()
+        df[name] = df[column_labels[0]].astype(str).str.strip()
         for column_label in column_labels[1:]:
-            data_frame[name] += null_sep + data_frame[column_label].astype(str).str.strip()
+            df[name] += null_sep + df[column_label].astype(str).str.strip()
 
         all_sep = "^[{sep}]+$".format(sep=null_sep)
         start_sep = "^[{sep}]+".format(sep=null_sep)
         end_sep = "[{sep}]+$".format(sep=null_sep)
         repeated_sep = "[{sep}]+".format(sep=null_sep)
 
-        data_frame[name] = data_frame[name].str.replace(all_sep, "")
-        data_frame[name] = data_frame[name].str.replace(start_sep, "")
-        data_frame[name] = data_frame[name].str.replace(end_sep, "")
-        data_frame[name] = data_frame[name].str.replace(repeated_sep, sep)
+        df[name] = df[name].str.replace(all_sep, "")
+        df[name] = df[name].str.replace(start_sep, "")
+        df[name] = df[name].str.replace(end_sep, "")
+        df[name] = df[name].str.replace(repeated_sep, sep)
 
 
 active_column_cls_list = [
@@ -79,18 +79,21 @@ column_cls_by_type = {column_cls.type(): column_cls for column_cls in active_col
 
 
 class ColumnHandler:
+    """
     column_def_by_label = {
-        "Concat(Q3,5,6,7)": [
+        "Text": [
             "StringConcat", {"column_labels": ["Q3", "Q5", "Q6", "Q7"], "sep": ". "},
         ],
     }
+    """
+    column_def_by_label = {}
 
     def get_column_by_label(self, label) -> DerivedColumn:
         log.info("column_cls_by_type: %s", column_cls_by_type)
         try:
             column_def = self.column_def_by_label[label]
         except KeyError:
-            raise ValueError('Derived label "{}" not found'.format(label))
+            raise ValueError(f'Derived label "{label}" not found')
 
         column_type, params = column_def
 
