@@ -22,21 +22,23 @@ class Serializable:
 
 
 class SerializableHandler(Serializable, metaclass=ABCMeta):
-    def initialization_data(self):
+    @classmethod
+    def initialization_data(cls):
         raise NotImplementedError()
 
-    def _load(self, path: Path):
+    @classmethod
+    def _load(cls, path: Path):
         """Load the items from disk"""
         if not path.exists():
             path.touch()
-            path.write_text(json.dumps(self.initialization_data()))
+            path.write_text(json.dumps(cls.initialization_data()))
 
         try:
-            log.debug("start load %s", self.__class__.__name__)
+            log.debug("start load %s", cls.__name__)
             with path.open() as f:
-                return self.deserialize(json.load(f))
+                return cls.deserialize(json.load(f))
         finally:
-            log.debug("end load %s", self.__class__.__name__)
+            log.debug("end load %s", cls.__name__)
 
     def _save(self, path: Path) -> None:
         """Save items to disk"""
