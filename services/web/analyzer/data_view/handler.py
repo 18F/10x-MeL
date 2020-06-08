@@ -6,8 +6,9 @@ import json
 import logging
 
 from analyzer.data_view.data_view_lib import (
-    DataView, DataViewId, Label, LabelSet, TransformList,
+    DataView, DataViewId, Label, LabelSet,
 )
+from analyzer.constraint_lib import Transform, TransformList
 from analyzer.dataset.dataset_lib import Dataset, DatasetId
 from analyzer.users.users_lib import User, UserId
 
@@ -51,6 +52,7 @@ class DataViewHistoryHandler(SerializableHandler):
         self._path = path
         self._data_view_history: HistoryLookup = {}
 
+        self._loaded = False
         self.load()
 
     def serialize(self) -> Dict[SerializableType, SerializableType]:
@@ -63,7 +65,8 @@ class DataViewHistoryHandler(SerializableHandler):
             HistoryKey.deserialize(key): DataViewId(value) for key, value in d.items()
         }
 
-    def initialization_data(self) -> HistoryLookup:
+    @classmethod
+    def initialization_data(cls) -> HistoryLookup:
         return {}
 
     def load(self):
@@ -74,9 +77,10 @@ class DataViewHistoryHandler(SerializableHandler):
             data_view_history = {}
 
         self._data_view_history = data_view_history
+        self._loaded = True
 
     def save(self):
-        if self._data_view_history is None:
+        if not self._loaded:
             log.warning("Attempting to save DataViews that have not been loaded")
             return
         self._save(self._path)
@@ -117,13 +121,14 @@ class DataViewHandler(SerializableHandler):
     def __init__(self, path: Path):
         self._path = path
 
-        self._data_views: Optional[List[DataView]] = None
-        self._data_view_by_id: Optional[Dict[DataViewId, DataView]] = {}
+        self._data_views: List[DataView] = []
+        self._data_view_by_id: Dict[DataViewId, DataView] = {}
 
         self._label_by_name_by_data_view: Dict[DataView, Dict[str, Label]] = {}
 
         self._data_view_id_by_serialization: Dict[str, DataViewId] = {}
 
+        self._loaded = False
         self.load()
 
     def serialize(self) -> List:
@@ -133,7 +138,8 @@ class DataViewHandler(SerializableHandler):
     def deserialize(cls, lst: List) -> List[DataView]:
         return [DataView.deserialize(elem) for elem in lst]
 
-    def initialization_data(self) -> List[DataView]:
+    @classmethod
+    def initialization_data(cls) -> List[DataView]:
         return []
 
     def load(self):
@@ -149,8 +155,10 @@ class DataViewHandler(SerializableHandler):
         for data_view in self._data_views:
             self._index_data_view(data_view)
 
+        self._loaded = True
+
     def save(self):
-        if self._data_views is None:
+        if not self._loaded:
             log.warning("Attempting to save DataViews that have not been loaded")
             return
         self._save(self._path)
@@ -262,8 +270,8 @@ class DataViewHandler(SerializableHandler):
     def transform_data_view(
         self,
         data_view_id: DataViewId,
-        add_transforms: Optional[TransformList] = None,
-        del_transforms: Optional[TransformList] = None,
+        add_transforms: Optional[List[Transform]] = None,
+        del_transforms: Optional[List[Transform]] = None,
         labels: Optional[LabelSet] = None,
     ) -> DataView:
         data_view = self.by_id(data_view_id)
@@ -278,7 +286,6 @@ class DataViewHandler(SerializableHandler):
                 for transform in augmented_transforms:
                     if del_transform.serialize() == transform.serialize():
                         augmented_transforms.remove(transform)
-                        log.info("removing %s", transform)
                         break
                 else:
                     log.error(
@@ -286,7 +293,8 @@ class DataViewHandler(SerializableHandler):
                     )
 
         if add_transforms:
-            augmented_transforms.extend(add_transforms)
+            for add_transform in add_transforms:
+                augmented_transforms.append(add_transform)
 
         # see if this DataView already exists
         serialization = self._serialize_for_cache(

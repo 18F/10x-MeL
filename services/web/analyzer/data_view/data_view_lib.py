@@ -131,8 +131,31 @@ class DataView(Serializable):
         self.parent_id = parent_data_view_id
         self.dataset_id = dataset_id
         self.user_id = user_id
-        self.labels = labels or LabelSet()
+        self._labels = labels or LabelSet()
         self.transforms = transforms or TransformList()
+
+    @property
+    def labels(self) -> LabelSet:
+        labels_seen = set()
+        all_labels = LabelSet()
+
+        for transform in self.transforms:
+            try:
+                for label_name in transform.labels:
+                    if label_name in labels_seen:
+                        continue
+                    labels_seen.add(label_name)
+                    all_labels.append(Label(label_name))
+            except AttributeError:
+                pass
+
+        for label in self._labels:
+            if label.name in labels_seen:
+                continue
+
+            labels_seen.add(label.name)
+            all_labels.append(label)
+        return all_labels
 
     def serialize(self) -> Dict[str, str]:
         labels = self.labels.serialize() if self.labels else LabelSet()

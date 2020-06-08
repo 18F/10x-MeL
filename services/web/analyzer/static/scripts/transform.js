@@ -102,7 +102,7 @@ class TransformManager {
     try {
       const result = await response.json();
       console.log('constraintDefs: ', result, 'this', this);
-      this.constraintDefs = result.map(c => ConstraintDef.fromDict(c));
+      this.constraintDefs = result.map(def => ConstraintDef.fromDict(def));
     } catch(err) {
       console.log('Fetch Error:', err);
     }
@@ -130,7 +130,7 @@ class TransformManager {
     const parameterSpecificationContainerId = 'constraintArgumentSpecificationContainer';
     const constraintNameContainer = createDiv({id: 'constraintNameContainer'});
 
-    const constraintNames = this.constraintDefTypes;//constraintDefsByType(constraintType);
+    const constraintNames = this.constraintDefTypes;
     const constraintNameSet = new Set(constraintNames);
 
     const addConstraintArguments = e => {
@@ -150,7 +150,7 @@ class TransformManager {
       emptyElement(parameterSpecificationContainer);
 
       if (constraintNameSet.has(currentValue)) {
-        this.addArgumentsToBuildWindow(currentValue, parameterSpecificationContainer);
+        this.addArgumentsToBuildWindow(currentValue, parameterSpecificationContainer, constraintType);
       }
     };
 
@@ -164,6 +164,11 @@ class TransformManager {
 
     const datalist = createDataList({id: 'constraintTypes'});
     for (const constraintName of constraintNames) {
+      const constraintDef = this.constraintDefByType(constraintName);
+      if (constraintDef.operations.indexOf(constraintType) === -1) {
+        continue;
+      }
+
       datalist.appendChild(createOption({value: constraintName}));
     }
 
@@ -183,7 +188,7 @@ class TransformManager {
   }
 
 
-  addArgumentsToBuildWindow(constraintName, parentElement) {
+  addArgumentsToBuildWindow(constraintName, parentElement, constraintType) {
     const exampleClass = 'constraintArgumentExample';
     const labelClass = 'constraintArgumentLabel';
     const parametersTableClassName = 'constraintArgumentTable';
@@ -191,17 +196,46 @@ class TransformManager {
 
     const parametersTable = createTable({cls: parametersTableClassName});
     for (const parameterDef of parameterDefs) {
-      const labelId = 'parameterInput__' + parameterDef.label;
 
-      const elements = [
-        createInput({
+      console.info("parameterDef.type", parameterDef.type);
+
+      const labelId = 'parameterInput__' + parameterDef.label;
+      const datalistId = 'parameterDatalist__' + parameterDef.label;
+
+      const elements = [];
+      if (parameterDef.type === ParameterDef.TYPE_COLUMN_NAME) {
+        const container = createSpan({});
+
+        const columnNames = createDataList({id: datalistId});
+        for (const label of app.dataView.labels) {
+          columnNames.appendChild(createOption({value: label.name}));
+        }
+        container.appendChild(columnNames);
+
+        container.appendChild(createInput({
           id: labelId,
           type: 'text',
-          keydown: e => ifEnterPressed(e, () => { return this.completeTransform(constraintName); }),
-        }),
-        createLabel({cls: labelClass, text: parameterDef.label}),
-        (parameterDef.example) ? createLabel({cls: exampleClass, text: parameterDef.example}) : null
-      ];
+          list: datalistId,
+          keydown: e => ifEnterPressed(e, () => this.completeTransform(constraintName, constraintType)),
+        }));
+
+        elements.push(container);
+      } else {
+        elements.push(createInput({
+          id: labelId,
+          type: 'text',
+          keydown: e => ifEnterPressed(e, () => this.completeTransform(constraintName, constraintType)),
+        }));
+
+      }
+
+      elements.push(createLabel({cls: labelClass, text: parameterDef.label}));
+
+      if (parameterDef.example) {
+        elements.push(createLabel({
+          cls: exampleClass, text: parameterDef.example,
+        }));
+      }
 
       const row = parametersTable.insertRow();
       for (const elem of elements) {
@@ -212,7 +246,7 @@ class TransformManager {
     parentElement.appendChild(parametersTable);
   }
 
-  async completeTransform(constraintName) {
+  async completeTransform(constraintName, constraintType) {
     const buildWindow = document.getElementById('buildConstraintWindow');
     const addWindow = document.getElementById('addConstraintWindow');
     const constraintTypeInput = document.getElementById('constraintTypeInput');
@@ -233,7 +267,7 @@ class TransformManager {
       console.info('save', constraintTypeInput.value, parameters);
       const constraintDefType = constraintTypeInput.value;
       const constraintDef = this.constraintDefByType(constraintDefType);
-      const constraint = new Constraint(constraintDef, parameters);
+      const constraint = new Constraint(constraintDef, parameters, constraintType);
 
       await this.transformDataView({dataView: app.dataView, addTransforms: [constraint]});
       hide(buildWindow);
@@ -366,12 +400,13 @@ class TransformManager {
       }
 
       const result = await response.json();
-      console.log('result: ', result);
+      console.info('result: ', result);
 
       if (!result.error) {
         app.dataView = DataView.deserialize(result['data_view']);
         const dataViewId = result['data_view_id'];
-        console.info(app.dataView.id, dataViewId);
+        console.info("transformDataView", app.dataView.id, dataViewId);
+        console.info(app.dataView);
 
       } else {
         console.error(
@@ -382,7 +417,7 @@ class TransformManager {
         );
       }
     } catch(err) {
-      console.log('Fetch Error:', err);
+      console.warn('Fetch Error:', err);
     }
   }
 

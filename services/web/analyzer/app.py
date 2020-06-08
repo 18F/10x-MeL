@@ -25,6 +25,7 @@ DATA_VIEWS_FILENAME = "data_views.json"
 USERS_FILENAME = "users.json"
 DATASETS_FILENAME = "datasets.json"
 DATA_VIEW_HISTORY_FILENAME = "data_view_history.json"
+TAGS_PREFIX = "tags"
 
 PAYLOAD_KEY = "q"
 
@@ -55,6 +56,7 @@ session = Session(
     datasets_filename=DATASETS_FILENAME,
     data_views_filename=DATA_VIEWS_FILENAME,
     data_view_history_filename=DATA_VIEW_HISTORY_FILENAME,
+    tag_prefix=TAGS_PREFIX,
 )
 
 
@@ -173,14 +175,144 @@ def set_most_recent_dataset() -> str:
         return jsonify(dict(error=3, msg=str(exc), dataset=None, user_id=user_id))
 
 
+@app.route("/add_tags", methods=["GET"])
+def add_tags() -> str:
+    key_data_view_id = "data_view_id"
+    key_primary_key = "primary_key"
+    key_primary_key_name = "primary_key_name"
+    key_tags = "tags"
+
+    payload = extract_payload()
+
+    data_view_id_str: str = payload.get(key_data_view_id, None)
+    primary_key: str = payload.get(key_primary_key, None)
+    primary_key_name: str = payload.get(key_primary_key_name, None)
+    tags: List[str] = payload.get(key_tags, None)
+
+    if not data_view_id_str:
+        return jsonify(dict(error=1, msg="no data_view_id specified"))
+    elif not primary_key:
+        return jsonify(dict(error=2, msg="no primary_key specified"))
+    elif not primary_key_name:
+        return jsonify(dict(error=3, msg="no primary_key_name specified"))
+    elif not tags:
+        return jsonify(dict(error=4, msg="no tags specified"))
+
+    data_view_id = DataViewId(data_view_id_str)
+
+    try:
+        updated_tags = session.add_tags(
+            tags=tags,
+            primary_keys=[primary_key],
+            primary_key_name=primary_key_name,
+            data_view_id=data_view_id,
+        )
+        return jsonify(dict(primary_key=primary_key, tags=list(updated_tags)))
+    except ValueError as exc:
+        return jsonify(dict(error=5, msg=str(exc)))
+
+
+@app.route("/remove_tags", methods=["GET"])
+def remove_tags() -> str:
+    key_data_view_id = "data_view_id"
+    key_primary_key = "primary_key"
+    key_primary_key_name = "primary_key_name"
+    key_tags = "tags"
+
+    payload = extract_payload()
+
+    data_view_id_str: str = payload.get(key_data_view_id, None)
+    primary_key: str = payload.get(key_primary_key, None)
+    primary_key_name: str = payload.get(key_primary_key_name, None)
+    tags: List[str] = payload.get(key_tags, None)
+
+    if not data_view_id_str:
+        return jsonify(dict(error=1, msg="no data_view_id specified"))
+    elif not primary_key:
+        return jsonify(dict(error=2, msg="no primary_key specified"))
+    elif not primary_key_name:
+        return jsonify(dict(error=3, msg="no primary_key_name specified"))
+    elif not tags:
+        return jsonify(dict(error=4, msg="no tags specified"))
+
+    data_view_id = DataViewId(data_view_id_str)
+
+    try:
+        updated_tags = session.remove_tags(
+            tags=tags,
+            primary_keys=[primary_key],
+            primary_key_name=primary_key_name,
+            data_view_id=data_view_id,
+        )
+        return jsonify(dict(primary_key=primary_key, tags=list(updated_tags)))
+    except ValueError as exc:
+        return jsonify(dict(error=5, msg=str(exc)))
+
+
+@app.route("/get_tags", methods=["GET"])
+def get_tags() -> str:
+    key_data_view_id = "data_view_id"
+    key_primary_keys = "primary_keys"
+
+    payload = extract_payload()
+
+    data_view_id_str: str = payload.get(key_data_view_id, None)
+    primary_keys: List[str] = payload.get(key_primary_keys, [])
+
+    data_view_id = DataViewId(data_view_id_str)
+
+    try:
+        tag_map = session.get_tags(primary_keys, data_view_id)
+        return jsonify(tag_map)
+    except ValueError as exc:
+        return jsonify(dict(error=5, msg=str(exc)))
+
+
 @app.route("/raw_data_for_data_view")
 def raw_data_for_data_view():
     key_data_view_id = "data_view_id"
+    key_sort_label = "sort_label"
+    key_sort_direction = "sort_dir"
     try:
         payload = extract_payload()
         data_view_id = DataViewId(payload[key_data_view_id])
-        entries = session.raw_data_for_data_view(data_view_id)
+        sort_label = payload[key_sort_label] if key_sort_label in payload else None
+
+        sort_dir = payload.get(key_sort_direction, None)
+        if sort_dir == "asc":
+            sort_asc = True
+        elif sort_dir == "desc":
+            sort_asc = False
+        else:
+            sort_asc = None
+
+        entries = session.raw_data_for_data_view(data_view_id, sort_label, sort_asc)
         return jsonify(dict(entries=entries))
+    except ValueError as exc:
+        return jsonify(dict(error=1, msg=str(exc), entries=-1))
+
+
+@app.route("/raw_entries_and_tags_for_data_view")
+def raw_entries_and_tags_for_data_view():
+    key_data_view_id = "data_view_id"
+    key_sort_label = "sort_label"
+    key_sort_direction = "sort_dir"
+    try:
+        payload = extract_payload()
+        data_view_id = DataViewId(payload[key_data_view_id])
+        sort_label = payload[key_sort_label] if key_sort_label in payload else None
+
+        sort_dir = payload.get(key_sort_direction, None)
+        if sort_dir == "asc":
+            sort_asc = True
+        elif sort_dir == "desc":
+            sort_asc = False
+        else:
+            sort_asc = None
+
+        entries, tags_by_key = session.raw_entries_and_tags(data_view_id, sort_label, sort_asc)
+
+        return jsonify(dict(entries=entries, tags_by_key=tags_by_key))
     except ValueError as exc:
         return jsonify(dict(error=1, msg=str(exc), entries=-1))
 
@@ -282,6 +414,79 @@ def word_counts_over_time():
     )
 
     return jsonify(response.serialize())
+
+
+@app.route("/categories")
+def categories():
+    sample_categories = {
+        "passports": [
+            "application",
+            "renewal",
+            "forms",
+            "process",
+            "visas",
+            "help",
+            "vacation",
+            "travel",
+            "wizard",
+            "expiration",
+            "post office",
+        ],
+        "coronavirus": [
+            "stimulus/check",
+            "outbreak",
+            "local",
+            "concern",
+            "task force",
+            "closed",
+            "businesses",
+        ],
+        "voting": [
+            "elections",
+            "registration",
+            "officials",
+            "selective service",
+            "absentee",
+            "driver license",
+        ],
+        "jobs": [
+            "small business",
+            "fraud",
+            "scams",
+            "applications",
+            "unemployment",
+            "compensation",
+            "benefits",
+        ],
+        "money": [
+            "unclaimed",
+            "credit report",
+            "social security",
+            "fraud",
+            "scam",
+            "phishing",
+        ],
+        "license": [
+            "marriage",
+            "birth",
+            "replacement birth certificate",
+            "social security card",
+            "replacement",
+        ],
+        "tax": [
+            "refund",
+            "direct deposit",
+            "state",
+            "website",
+            "federal tax refund",
+            "clear instruction",
+            "credit card",
+            "consumer action",
+            "low income",
+
+        ]
+    }
+    return jsonify(sample_categories)
 
 
 @app.route("/hello_world")

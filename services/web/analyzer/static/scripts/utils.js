@@ -23,6 +23,14 @@ function ifEnterPressed(e, func) {
   }
 }
 
+function ifEscPressed(e, func) {
+  if (e.key === 'Escape') {
+    func(e);
+  }
+}
+
+
+
 const px = value => value + 'px';
 
 
@@ -80,7 +88,7 @@ function createElement(tag, args) {
     delete args.id;
   }
 
-  if (args.html) {
+  if (args.html !== undefined) {
     e.innerHTML = args.html;
     delete args.html;
   }
@@ -161,6 +169,18 @@ function createDiv() {
   return createElement('div', arguments[0]);
 }
 
+function createDetails() {
+  return createElement('details', arguments[0]);
+}
+
+function createNav() {
+  return createElement('nav', arguments[0]);
+}
+
+function createSection() {
+  return createElement('section', arguments[0]);
+}
+
 function createH1() {
   return createElement('h1', arguments[0]);
 }
@@ -203,6 +223,10 @@ function createDataList() {
 
 function createSpan() {
   return createElement('span', arguments[0]);
+}
+
+function createLink() {
+  return createElement('a', arguments[0]);
 }
 
 function createTable() {

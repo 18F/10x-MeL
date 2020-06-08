@@ -12,7 +12,7 @@ class DataViewManager {
   init() {
     console.group('DataViewManager.init');
     if (!this.dataView) {
-      console.info("User has not loaded a Dataset");
+      console.info('User has not loaded a Dataset');
       this.hideToolWindow();
       return;
     }
@@ -47,16 +47,26 @@ class DataViewManager {
     console.trace();
     console.info('updateDataView', this.dataView);
     if (!this.dataView) {
-      console.info("User has not loaded a Dataset");
+      console.info('User has not loaded a Dataset');
       this.hideToolWindow();
       return;
     }
 
     this.showToolWindow();
 
+    const payload = {
+      data_view_id: this.dataView.id,
+    };
+
+    if (app.sortLabel) {
+      console.info('setting payload.sort_label');
+      payload.sort_label = app.sortLabel.name;
+      payload.sort_dir = app.sortDir;
+    }
+
     const url = buildRequest(
-      services.rawDataForDataView,
-      { data_view_id: this.dataView.id },
+      services.rawEntriesAndTagsForDataView,
+      payload,
     );
 
     console.info('updateDataView URL', url);
@@ -71,6 +81,10 @@ class DataViewManager {
       const result = await response.json();
       if (!result.error) {
         this.entries = result['entries'];
+        const tagsByKey = result['tags_by_key'];
+        if (tagsByKey) {
+          app.tagManager.updateMap(tagsByKey);
+        }
         this.refreshDataView();
       } else {
         console.error(
@@ -85,9 +99,9 @@ class DataViewManager {
   refreshDataView() {
     const dataViewTable = document.getElementById('dataViewTable');
 
-    console.info("DataViewManager.updateDataView");
+    console.info('DataViewManager.updateDataView');
     if (!this.dataView) {
-      console.info("Cannot display data, dataView is ", this.dataView);
+      console.info('Cannot display data, dataView is', this.dataView);
     }
     const entries = this.entries;
     const labelsHidden = this.labelsHidden;
@@ -130,30 +144,21 @@ class DataViewManager {
     const entryKeys = Object.keys(entries);
     const tableBody = dataViewTable.createTBody();
     let maxIndex = 0;
+
+    const renderer = new DataViewRenderer();
     for (const [index, entryKey] of entryKeys.entries()) {
       const entry = entries[entryKey];
       const row = tableBody.insertRow();
 
       for (const label of labels) {
-        let value = entry[label.name];
-        if (value === undefined) {
-          value = '';
-        }
-        if (entry)
-        row.insertCell().appendChild(createSpan({
-          cls: 'cellText',
-          text: value,
-          style: {
-            'font-size': px(label.fontSize || DataViewManager.defaultFontSize),
-            'overflow-wrap': 'anywhere',
-          },
-        }));
+        const parentElement = row.insertCell();
+        renderer.renderCell(entry, label, parentElement);
       }
 
       maxIndex = Math.max(maxIndex, index);
     }
 
-    console.info("processed items:", maxIndex);
+    console.info('processed items:', maxIndex);
     // app.chartManager.update();
   }
 
@@ -173,6 +178,45 @@ class DataViewManager {
       hide(container);
       document.body.removeChild(container);
     }
+
+    // sort by column
+
+    const sortByColumnContainer = createDiv({});
+
+    sortByColumnContainer.appendChild(createDiv({
+      cls: 'headerEditorButton',
+      text: 'sort by',
+      mousedown: e => ifPrimaryClick(e, () => {
+        app.sortLabel = label;
+        show(sortByColumnAscendingButton);
+        show(sortByColumnDescendingButton);
+      })
+    }));
+
+    const sortByColumnAscendingButton = createSpan({
+      cls: 'headerEditorButton',
+      html: '&uarr;',
+      mousedown: e => ifPrimaryClick(e, () => {
+        app.sortDir = 'asc';
+        cleanup();
+        this.updateDataView();
+      }),
+    });
+
+    const sortByColumnDescendingButton = createSpan({
+      cls: 'headerEditorButton',
+      html: '&darr;',
+      mousedown: e => ifPrimaryClick(e, () => {
+        app.sortDir = 'desc';
+        cleanup();
+        this.updateDataView();
+      }),
+    });
+
+    sortByColumnContainer.appendChild(sortByColumnAscendingButton);
+    sortByColumnContainer.appendChild(sortByColumnDescendingButton);
+    hide(sortByColumnAscendingButton);
+    hide(sortByColumnDescendingButton);
 
     // column font size
 
@@ -244,6 +288,7 @@ class DataViewManager {
       })
     );
 
+    window.appendChild(sortByColumnContainer);
     window.appendChild(setFontSizeContainer);
     window.appendChild(setColumnWidthContainer);
     window.appendChild(hideColumnContainer);
@@ -287,6 +332,192 @@ class DataViewManager {
       }
 
     } catch (err) {
+      console.log('Fetch Error:', err);
+    }
+  }
+}
+
+class DataViewRenderer {
+  renderCell(entry, label, parentElement) {
+    if (label.name === 'tag') {
+      app.tagManager.renderTagCell(entry, label, parentElement);
+    } else {
+      this.renderDefaultCell(entry, label, parentElement);
+    }
+  }
+
+  renderDefaultCell(entry, label, parentElement) {
+    const value = entry[label.name] ? entry[label.name] : '';
+
+    parentElement.appendChild(createDiv({
+      cls: 'cellText',
+      html: value,
+      style: {
+        'font-size': px(label.fontSize || DataViewManager.defaultFontSize),
+        'overflow-wrap': 'anywhere',
+      },
+    }));
+  }
+}
+
+
+class TagManager {
+  TAG_TYPE = 'Tag';
+  PARAMETER_PRIMARY_KEY_NAME = 'primary_key_column_label';
+
+  constructor() {
+    this._primaryKeyName = null;
+    this._tagsByKey = {}
+  }
+
+  get primaryKeyName() {
+    if (this._primaryKeyName === null) {
+      this._primaryKeyName = this.extractPrimaryKeyName();
+    }
+    return this._primaryKeyName;
+  }
+
+  extractPrimaryKeyName() {
+    for (const transform of app.dataView.transforms) {
+      if (transform.type !== this.TAG_TYPE) {
+        continue;
+      }
+
+      const primaryKeyName = transform.parameters[this.PARAMETER_PRIMARY_KEY_NAME];
+      console.info('Found PrimaryKey', primaryKeyName);
+      return primaryKeyName;
+    }
+
+    console.error('Failed to find valid PrimaryKey:', this._primaryKeyName);
+    return null;
+  }
+
+  updateMap(tagsByKey) {
+    this._tagsByKey = tagsByKey;
+  }
+
+  renderTagCell(entry, label, parentElement) {
+    const primaryKey = entry[this.primaryKeyName];
+
+    const container = createDiv({
+      cls: 'tagAction',
+    });
+
+    const tags = this._tagsByKey[primaryKey] || [];
+    const tagsDisplay = this.tagDataToHtml(tags, primaryKey);
+
+    container.appendChild(tagsDisplay);
+
+    const addTagInput = createInput({
+      cls: 'tagAction',
+      type: 'text',
+      keydown: e => {
+        console.info("key", e.key);
+        if (e.key === 'Enter') {
+          // clean up
+          hide(addTagInput);
+          const tags = addTagInput.value.split(",").map(s => s.trim());
+          this.addTags(tags, primaryKey);
+          // this.refreshRow(primaryKey);
+          app.dataViewManager.updateDataView();
+
+        } else if (e.key === 'Escape') {
+          hide(addTagInput);
+          addTagInput.value = '';
+        }
+      },
+    });
+
+    container.appendChild(addTagInput);
+    hide(addTagInput);
+
+    parentElement.appendChild(container);
+
+    parentElement.onmousedown = e => ifPrimaryClick(e, () => {
+      addTagInput.focus();
+      show(addTagInput);
+      setTimeout(() => { addTagInput.focus(); }, 10);
+      addTagInput.focus();
+    });
+  }
+
+  tagDataToHtml(tags, primaryKey) {
+    const mainContainer = createSpan({});
+    for (const rawTag of tags) {
+      const tagContainer = createSpan({});
+      const tag = rawTag.trim();
+
+      tagContainer.appendChild(createButton({
+        html: '&times;',
+        mousedown: e => ifPrimaryClick(e, () => {
+          console.info(e);
+          hide(tagContainer);
+          this.removeTags([tag], primaryKey);
+          app.dataViewManager.updateDataView();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+        }),
+      }));
+
+      tagContainer.appendChild(createLink({
+        text: tag,
+      }));
+
+      mainContainer.appendChild(tagContainer);
+    }
+    return mainContainer;
+  }
+
+  async addTags(tagNames, primaryKey) {
+    const url = buildRequest(services.addTags, {
+      'tags': tagNames,
+      'primary_key': primaryKey,
+      'primary_key_name': this.primaryKeyName,
+      'data_view_id': app.dataView.id,
+    });
+
+    try {
+      const response = await fetch(url);
+      if (response.status !== HTTP_OK) {
+        console.error('error processing request, status: ' + response.status);
+        return;
+      }
+
+      const result = await response.json();
+      if (!result.error) {
+        console.info("Successfully added", tagNames, "to", primaryKey, "in", this.primaryKeyName);
+
+      } else {
+        console.error('fetchBarData error', result.error);
+      }
+    } catch(err) {
+      console.log('Fetch Error:', err);
+    }
+  }
+
+  async removeTags(tagNames, primaryKey) {
+    const url = buildRequest(services.removeTags, {
+      'tags': tagNames,
+      'primary_key': primaryKey,
+      'primary_key_name': this.primaryKeyName,
+      'data_view_id': app.dataView.id,
+    });
+
+    try {
+      const response = await fetch(url);
+      if (response.status !== HTTP_OK) {
+        console.error('error processing request, status: ' + response.status);
+        return;
+      }
+
+      const result = await response.json();
+      if (!result.error) {
+        console.info("Successfully removed", tagNames, "from", primaryKey, "in", this.primaryKeyName);
+
+      } else {
+        console.error('fetchBarData error', result.error);
+      }
+    } catch(err) {
       console.log('Fetch Error:', err);
     }
   }

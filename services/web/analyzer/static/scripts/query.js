@@ -3,6 +3,9 @@
 class ParameterDef {
   static TYPE_TEXT = 'text';
   static TYPE_TEXT_LIST = 'text_list';
+  static TYPE_INTEGER = 'int';
+  static TYPE_FLOAT = 'float';
+  static TYPE_COLUMN_NAME = 'column_name';
 
   static SEPARATOR = ',';
 
@@ -31,6 +34,15 @@ class ParameterDef {
     if (type === ParameterDef.TYPE_TEXT) {
       return rawValue.toString();
 
+    } else if (type === ParameterDef.TYPE_COLUMN_NAME) {
+      return rawValue.toString();
+
+    } else if (type === ParameterDef.TYPE_INTEGER) {
+      return parseInt(rawValue);
+
+    } else if (type === ParameterDef.TYPE_FLOAT) {
+      return parseFloat(rawValue);
+
     } else if (type === ParameterDef.TYPE_TEXT_LIST) {
       if (typeof rawValue === 'string') {
         const sep = ParameterDef.SEPARATOR;
@@ -49,11 +61,13 @@ class ConstraintDef {
   static KEY_TYPE = 'type';
   static KEY_DESC = 'description';
   static KEY_PARAMS = 'params';
+  static KEY_OPS = 'ops';
 
-  constructor(type, description, paramDefs) {
+  constructor(type, description, paramDefs, operations) {
     this._type = type;
     this._description = description;
-    this._parameters = paramDefs.map(p => ParameterDef.fromDict(p));
+    this._parameters = paramDefs;
+    this._operations = operations;
   }
 
   get type() {
@@ -68,21 +82,27 @@ class ConstraintDef {
     return this._parameters;
   }
 
+  get operations() {
+    return this._operations;
+  }
+
   static fromDict(dict) {
     return new ConstraintDef(
       dict[ConstraintDef.KEY_TYPE],
       dict[ConstraintDef.KEY_DESC],
       dict[ConstraintDef.KEY_PARAMS].map(p => ParameterDef.fromDict(p)),
+      dict[ConstraintDef.KEY_OPS],
     );
   }
 }
 
 
 class Constraint {
-  constructor(constraintDef, parameters) {
+  constructor(constraintDef, parameters, operation) {
     console.info(constraintDef, parameters);
     this._def = constraintDef;
     this.parameters = parameters;
+    this.operation = operation;
   }
 
   get type() {
@@ -149,7 +169,7 @@ class Constraint {
     const parameterDefs = this._def.parameters;
     const parameters = this.parameters;
 
-    const values = [this.type];
+    const values = [this.type, this.operation];
     for (const parameterDef of parameterDefs) {
       const parameterType = parameterDef.type;
       const parameterName = parameterDef.name;
@@ -167,6 +187,7 @@ class Constraint {
       [constraintType, param_0, param_1, ..., param_n]
      */
     const constraintType = values.shift();
+    const operation = values.shift();
 
     const constraintDef = app.transformManager.constraintDefByType(constraintType);
     const parameterDefs = constraintDef.parameters;
@@ -184,6 +205,7 @@ class Constraint {
     return new Constraint(
       constraintDef,
       parameters,
+      operation,
     )
   }
 }
