@@ -338,10 +338,12 @@ class Chart {
 }
 
 class ChartManager {
-  constructor(chartWindowId) {
+  constructor(chartWindowId, categoryWindowId) {
     this.chartIdCounter = 0;
     this.chartWindowId = chartWindowId;
     this.chartWindow = null;
+    this.categoryWindow = null;
+    this.categoryWindowId = categoryWindowId;
     this.chartById = {};
     this.charts = [];
   }
@@ -355,6 +357,8 @@ class ChartManager {
   initDisplayCharts() {
     const display = () => {
       this.chartWindow = document.getElementById(this.chartWindowId);
+      this.categoryWindow = document.getElementById(this.categoryWindowId);
+      // this.createCategories(this.categoryWindow);
 
       if (Object.keys(app.chartManager.chartById).length) {
         this.showChartWindow();
@@ -370,6 +374,49 @@ class ChartManager {
 
   get nextChartId() {
     return this.chartIdCounter++;
+  }
+
+  createCategories(parentElement) {
+    app.chartManager.chartById[0] = 1;
+    console.info('createCategories');
+
+    const categoryTable = createTable({id: 'categoryTable'});
+    const headingRow = categoryTable.insertRow();
+    headingRow.insertCell().appendChild(createSpan({
+      html: 'autocat',
+      cls: 'categoryTableHeading',
+    }));
+
+    for (const category in categories) {
+      for (const subcategory of categories[category]) {
+        const row = categoryTable.insertRow();
+
+        row.insertCell().appendChild(createSpan({
+          text: category,
+          cls: 'categoryTableCategory',
+        }));
+
+        row.insertCell().appendChild(createSpan({
+          text: subcategory,
+          cls: 'categoryTableSubcategory',
+        }));
+      }
+    }
+
+    parentElement.appendChild(createDiv({
+      id: 'chartWorkingMsg',
+      html: "working...",
+      style: {
+        padding: '20px',
+      }
+    }));
+
+
+    setTimeout(() => {
+      document.getElementById('chartWorkingMsg').style.display = 'none';
+      parentElement.appendChild(categoryTable);
+    }, 750 + Math.random() * 250);
+
   }
 
   createExampleCharts() {
@@ -477,3 +524,71 @@ class ChartManager {
     }
   }
 }
+
+const categories = {
+"passports": [
+  "application",
+  "renewal",
+  "forms",
+  "process",
+  "visas",
+  "help",
+  "vacation",
+  "travel",
+  "wizard",
+  "expiration",
+  "post office",
+],
+  "coronavirus": [
+  "stimulus/check",
+  "outbreak",
+  "local",
+  "concern",
+  "task force",
+  "closed",
+  "businesses",
+],
+  "voting": [
+  "elections",
+  "registration",
+  "officials",
+  "selective service",
+  "absentee",
+  "driver license",
+],
+  "jobs": [
+  "small business",
+  "fraud",
+  "scams",
+  "applications",
+  "unemployment",
+  "compensation",
+  "benefits",
+],
+  "money": [
+  "unclaimed",
+  "credit report",
+  "social security",
+  "fraud",
+  "scam",
+  "phishing",
+],
+  "license": [
+  "marriage",
+  "birth",
+  "replacement birth certificate",
+  "social security card",
+  "replacement",
+],
+  "tax": [
+  "refund",
+  "direct deposit",
+  "state",
+  "website",
+  "federal tax refund",
+  "clear instruction",
+  "credit card",
+  "consumer action",
+  "low income",
+  ]
+};

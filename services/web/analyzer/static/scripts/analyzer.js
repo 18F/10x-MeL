@@ -10,8 +10,11 @@ const services = {
   getConstraintDefs: 'get_constraint_defs',
   mostRecentDataView: 'most_recent_data_view',
   rawDataForDataView: 'raw_data_for_data_view',
+  rawEntriesAndTagsForDataView: 'raw_entries_and_tags_for_data_view',
   transformDataView: 'transform_data_view',
   countUnique: 'count_unique',
+  addTags: 'add_tags',
+  removeTags: 'remove_tags',
   wordCountsOverTime: 'word_counts_over_time',
   tfIdfOverValuesData: 'tf_idf_over_values',
 };
@@ -28,7 +31,7 @@ const PAYLOAD_KEY = "q";
 
 const ConstraintType = {
   FILTER: 'filter',
-  ENRICHMENT: 'enrichment',
+  ENRICHMENT: 'enrich',
 };
 Object.freeze(ConstraintType);
 
@@ -82,6 +85,7 @@ class App {
   static datasetSelectionWindowId = 'datasetSelectionWindow';
 
   static chartWindowId = 'chartWindow';
+  static categoryWindowId = 'categoryWindow';
   static chart0CloseButtonId = 'chart0__closeButton';
   static chart1CloseButtonId = 'chart1__closeButton';
   static chart2CloseButtonId = 'chart2__closeButton';
@@ -103,8 +107,11 @@ class App {
       App.datasetSelectionWindowId,
     );
 
+    this.tagManager = new TagManager();
+
     this.chartManager = new ChartManager(
       App.chartWindowId,
+      App.categoryWindowId,
       App.chart0CloseButtonId,
       App.chart1CloseButtonId,
       App.chart2CloseButtonId,
@@ -126,6 +133,9 @@ class App {
 
     this.dataViewManager = new DataViewManager();
     Object.seal(this.dataViewManager);
+
+    this.sortLabel = null;
+    this.sortDir = "desc";
   }
 
   init() {
@@ -136,6 +146,7 @@ class App {
     const dataViewManager = this.dataViewManager;
     const chartManager = this.chartManager;
     const transformManager = this.transformManager;
+    const tagManager = this.tagManager;
 
     const initDatasetManager = datasetManager.init.bind(datasetManager);
     const initDataViewManager = dataViewManager.init.bind(dataViewManager);
@@ -154,13 +165,14 @@ class App {
       chartWindow.ondblclick = () => {
         const dims = {};
         if (chartWindow.clientWidth === 50) {
-          [dims.width, dims.height] = [1450, 970];
+          [dims.width, dims.height] = [750, 450];
         } else {
           [dims.width, dims.height] = [10, 10];
         }
         chartWindow.style.width = px(dims.width);
         chartWindow.style.height = px(dims.height);
       };
+
       return Promise.all([]);
     };
 
