@@ -6,7 +6,7 @@ import logging
 import pandas as pd
 
 from analyzer.utils import Serializable, SerializableType
-from analyzer.constraint_lib import constraint_manager, Constraint
+from analyzer.constraint_lib import transform_manager, Constraint
 
 DataFrame = pd.DataFrame
 
@@ -108,7 +108,7 @@ class QueryParser:
                 log.error("Constraint has no class name - skipping: {}".format(d))
                 continue
 
-            constraint_cls = constraint_manager.constraint_by_name(class_name)
+            constraint_cls = transform_manager.constraint_by_name(class_name)
             constraint = constraint_cls(**args)
             constraints.append(constraint)
 
