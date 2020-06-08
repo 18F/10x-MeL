@@ -42,17 +42,61 @@ input {
     background: none;
 }
 
+
 #chartWindow {
     position: fixed;
-    width: 1450px;
-    height: 970px;
-    right: 20px;
+    width: 750px;
+    height: 450px;
     bottom: 20px;
+    right: 20px;
+
+    overflow: scroll;
 
     border: 1px solid rgba(160,160,160,0.5);
     box-shadow: rgba(64,64,64,0.25) 4px 4px 4px;
     background-color: rgb(255,255,255);
-    padding: 50px 20px 10px;
+    padding: 20px 20px 10px;
+}
+
+
+#categoryWindow {
+    display: none;
+    position: fixed;
+    width: 550px;
+    height: 450px;
+    left: 20px;
+    bottom: 20px;
+
+    overflow: scroll;
+
+    border: 1px solid rgba(160,160,160,0.5);
+    box-shadow: rgba(64,64,64,0.25) 4px 4px 4px;
+    background-color: rgb(255,255,255);
+    padding: 20px 20px 10px;
+}
+
+
+.categoryTableHeading {
+    font-weight: 300;
+
+    font-size: 28px;
+    color: rgb(0,0,0);
+    margin: 20px 0;
+    column-span: all;
+}
+
+.categoryTableCategory {
+    font-weight: bold;
+    font-size: 16px;
+    color: rgb(112,112,112);
+    margin: 10px;
+}
+
+.categoryTableSubcategory {
+    font-weight: bold;
+    font-size: 18px;
+    color: rgb(48,48,48);
+    margin: 10px;
 }
 
 .chartContainer {
@@ -79,6 +123,40 @@ input {
     box-shadow: rgba(128,128,128,0.5) 0 0 4px 0;
 }
 
+.tagAction input {
+    background: none;
+    display: block;
+    width: min-content;
+    padding: 10px;
+    margin: 10px 0;
+    font-size: 14px;
+    color: rgb(64,64,64);
+    text-align: left;
+    outline: none;
+}
+
+.tagAction button {
+    padding: 0 3px 0 0;
+    background: none;
+    border: none;
+    font-size: 18px;
+    color: rgb(128,128,128);
+    cursor: pointer;
+}
+
+.tagAction span {
+    display: inline-flex;
+    margin: 0 5px 0 0;
+}
+
+.tagAction span a {
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.tagAction span a:hover {
+    text-decoration: underline;
+}
 
 .headerEditorButton {
     border: none;
@@ -111,6 +189,11 @@ input {
 }
 
 .headerEditorContainer {
+    background: none;
+    padding: 20px;
+}
+
+.cellActionContainer {
     background: none;
     padding: 20px;
 }
@@ -306,10 +389,22 @@ input {
 .cellText {
     /*
     overflow-wrap: break-word;
-     */
     overflow-wrap: anywhere;
+     */
+    word-break: break-all;
 
     text-overflow: ellipsis;
+}
+
+.cellText a {
+    font-weight: bold;
+    text-decoration: none;
+    color: #303030;
+}
+
+.cellText a:hover {
+    text-decoration: underline;
+    color: #000000;
 }
 
 .button {
