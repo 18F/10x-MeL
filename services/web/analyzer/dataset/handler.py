@@ -19,6 +19,7 @@ class DatasetHandler(SerializableHandler):
         self._dataset_by_filename: Dict[str, Dataset] = {}
         self._dataset_by_id: Dict[DatasetId, Dataset] = {}
 
+        self._loaded = False
         self.load()
 
     def find(self, string: Optional[str] = None) -> List[Dataset]:
@@ -38,7 +39,8 @@ class DatasetHandler(SerializableHandler):
     def deserialize(cls, lst: List) -> List[Dataset]:
         return [Dataset.deserialize(elem) for elem in lst]
 
-    def initialization_data(self) -> List[Dataset]:
+    @classmethod
+    def initialization_data(cls) -> List[Dataset]:
         return []
 
     def load(self):
@@ -55,17 +57,19 @@ class DatasetHandler(SerializableHandler):
         for dataset in self._datasets:
             self._index_dataset(dataset)
 
+        self._loaded = True
+
     def _index_dataset(self, dataset: Dataset):
         filename = dataset.filename
-        assert not self.has_filename(filename), "filename {} already exists".format(filename)
+        assert not self.has_filename(filename), f"filename {filename} already exists"
         self._dataset_by_filename[filename] = dataset
 
         dataset_id = dataset.id
-        assert dataset_id not in self._dataset_by_id, "id {} already exists".format(dataset_id)
+        assert dataset_id not in self._dataset_by_id, f"id {dataset_id} already exists"
         self._dataset_by_id[dataset_id] = dataset
 
     def save(self):
-        if self._datasets is None:
+        if not self._loaded:
             log.warning("Attempting to save Datasets that have not been loaded")
             return
         self._save(self._path)

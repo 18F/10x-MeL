@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import List, Dict, Tuple, Optional, Union
 from time import time
 import logging
 
 from analyzer.analyzer_lib import Analyzer
-from analyzer.constraint_lib import constraint_manager, ConstraintDef
+from analyzer.constraint_lib import transform_manager, ConstraintDef
 from analyzer.query_processor_lib import QueryResponse, QueryErrorResponse
 from analyzer.dataset.dataset_lib import Dataset, DatasetId
 from analyzer.dataset.handler import DatasetHandler
@@ -16,6 +16,8 @@ from analyzer.data_view.data_view_lib import (
 from analyzer.data_view.handler import DataViewHandler, DataViewHistoryHandler
 from analyzer.data_view.rich_data_view import RichDataView
 from analyzer.users.users_lib import User, UserHandler, UserId
+from analyzer.transforms.enrichments_lib import TagHandler
+from analyzer.constraint_lib import TransformResourceHandler
 
 
 log = logging.getLogger(__name__)
@@ -40,6 +42,7 @@ class Session:
         datasets_filename: str,
         data_views_filename: str,
         data_view_history_filename: str,
+        tag_prefix: str,
     ):
         log.info("Creating new session")
 
@@ -50,17 +53,24 @@ class Session:
         datasets_path = config_dir / datasets_filename
         data_views_path = config_dir / data_views_filename
         data_view_history_path = config_dir / data_view_history_filename
+        tag_dir = config_dir
 
         self.user_handler = UserHandler(users_path)
         self.dataset_handler = DatasetHandler(datasets_path)
         self.data_view_handler = DataViewHandler(data_views_path)
         self.data_view_history_handler = DataViewHistoryHandler(data_view_history_path)
+        self.tag_handler = TagHandler(tag_dir, tag_prefix)
+
+        self.transform_resource_handler = TransformResourceHandler(
+            tag_handler=self.tag_handler,
+        )
 
         self._analyzer = Analyzer(
             data_dir=self.data_dir,
             user_handler=self.user_handler,
             dataset_handler=self.dataset_handler,
             data_view_handler=self.data_view_handler,
+            transform_resource_handler=self.transform_resource_handler,
         )
 
         user = self.user_handler.default_user
@@ -72,10 +82,10 @@ class Session:
             data_view_id = None
 
         if data_view_id:
-            log.info("warming up data frame")
+            log.info("warming up data frame for %s", data_view_id)
             start_time = time()
             self._analyzer.active_dataframe(self.rich_data_view(data_view_id))
-            log.info("done: %s", time() - start_time)
+            log.info(f"done: {time() - start_time:.2f} sec")
         else:
             log.info("DataView ID is %s", data_view_id)
 
@@ -119,7 +129,7 @@ class Session:
 
     @classmethod
     def get_constraint_defs(cls) -> List[ConstraintDef]:
-        return list(constraint_manager.get_constraint_defs())
+        return list(transform_manager.get_constraint_defs())
 
     def get_most_recent_data_view(
         self,
@@ -175,6 +185,50 @@ class Session:
 
         return data_view
 
+    def add_tags(
+        self,
+        tags: List[str],
+        primary_keys: List[str],
+        primary_key_name: str,
+        data_view_id: DataViewId,
+    ):
+        data_view = self.rich_data_view(data_view_id)
+
+        return self.tag_handler.get_or_create(
+            dataset_id=data_view.dataset_id, primary_key_name=primary_key_name,
+        ).add_tags(
+            tags=tags, keys=primary_keys,
+        )
+
+    def remove_tags(
+        self,
+        tags: List[str],
+        primary_keys: List[str],
+        primary_key_name: str,
+        data_view_id: DataViewId,
+    ):
+        data_view = self.rich_data_view(data_view_id)
+
+        return self.tag_handler.get_or_create(
+            dataset_id=data_view.dataset_id, primary_key_name=primary_key_name,
+        ).remove_tags(
+            tags=tags, keys=primary_keys,
+        )
+
+    def get_tags(
+        self,
+        primary_keys: List[str],
+        data_view_id: DataViewId,
+    ) -> Dict[str, List[str]]:
+        data_view = self.rich_data_view(data_view_id)
+
+        tag_map = self.tag_handler.get(data_view.dataset_id)
+
+        if not tag_map:
+            return {key: [] for key in primary_keys}
+
+        return {key: list(tag_map.get_tags_by_key(key)) for key in primary_keys}
+
     def count_uniques(self, column_name: str, data_view_id: DataViewId) -> QueryResponse:
         data_view = self.rich_data_view(data_view_id)
         if not data_view:
@@ -225,10 +279,44 @@ class Session:
 
         return QueryResponse(data=historical_counts)
 
-    def raw_data_for_data_view(self, data_view_id: DataViewId):
+    def raw_data_for_data_view(
+        self,
+        data_view_id: DataViewId,
+        sort_label: Optional[str] = None,
+        sort_asc: Optional[bool] = None,
+    ):
         return self._analyzer.raw_data_for_data_view(
-            self.rich_data_view(data_view_id)
+            data_view=self.rich_data_view(data_view_id),
+            sort_label=sort_label,
+            sort_asc=sort_asc,
         )
+
+    def raw_entries_and_tags(
+        self,
+        data_view_id: DataViewId,
+        sort_label: Optional[str] = None,
+        sort_asc: Optional[bool] = None,
+    ) -> Tuple[Dict, Dict[str, List[str]]]:
+        data_view = self.rich_data_view(data_view_id)
+
+        entries = self._analyzer.raw_data_for_data_view(
+            data_view=self.rich_data_view(data_view_id),
+            sort_label=sort_label,
+            sort_asc=sort_asc,
+        )
+
+        tag_map = self.tag_handler.get(data_view.dataset_id)
+        if tag_map:
+            primary_key_name = tag_map.primary_key_name
+            get_tags_by_key = tag_map.get_tags_by_key
+
+            entry_keys = [e[primary_key_name] for e in entries.values()]
+
+            tags_by_key = {key: get_tags_by_key(key) for key in entry_keys}
+        else:
+            tags_by_key = {}
+
+        return entries, tags_by_key
 
     def transform_data_view(
         self,

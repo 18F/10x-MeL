@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from typing import List, Dict, Tuple, Optional, Union
+from typing import List, Dict, Tuple, Optional
 from pathlib import Path
 import logging
 
 from analyzer.utils import Serializable, SerializableHandler
 from analyzer.users import UserId
 from analyzer.dataset import DatasetId
-from analyzer.dataset.dataset_lib import Dataset
 
 
 log = logging.getLogger(__name__)
@@ -43,10 +42,11 @@ class UserHandler(SerializableHandler):
         self._by_id: Dict[UserId, User] = {}
         self.load()
 
-    def initialization_data(self):
+    @classmethod
+    def initialization_data(cls):
         return {
-            self.KEY_USERS: [self.default_user.serialize()],
-            self.KEY_HISTORY: self._history,
+            cls.KEY_USERS: [cls.default_user.serialize()],
+            cls.KEY_HISTORY: {},
         }
 
     def load(self):

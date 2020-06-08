@@ -17,8 +17,9 @@ from analyzer.users.users_lib import UserHandler
 from analyzer.data_view.data_view_lib import Label, LabelSet, DataViewId
 from analyzer.data_view.rich_data_view import RichDataView
 from analyzer.dataset.dataset_lib import Dataset, DatasetId
-from analyzer.constraint_lib import Transform
-from analyzer.column_processor.column_processor import ColumnHandler
+from analyzer.constraint_lib import (
+    TransformResourceHandler, Transform, FilterTransform, EnrichmentTransform,
+)
 
 from analyzer.text_processing import WordHistoryProcessor, WordHistoryResult
 
@@ -51,13 +52,16 @@ class Analyzer:
         data_view_handler: DataViewHandler,
         dataset_handler: DatasetHandler,
         user_handler: UserHandler,
+        transform_resource_handler: TransformResourceHandler,
     ):
-        self.data_dir = data_dir
+        self.data_dir = Path(data_dir)
+        assert self.data_dir.exists()
+
         self._data_view_handler = data_view_handler
         self._dataset_handler = dataset_handler
         self._user_handler = user_handler
+        self.transform_resource_handler = transform_resource_handler
 
-        self._column_handler = ColumnHandler()
         self._active_dataframe_by_data_view: Dict[RichDataView, DataFrame] = {}
         self._df_cache_by_dataset = defaultdict(OrderedDict)
         self._data_view_transforms_by_dataset_id: TransformLookup = defaultdict(dict)
@@ -81,16 +85,25 @@ class Analyzer:
 
             if cached_data_view_id:
                 df = self._get_df(self.rich_data_view(cached_data_view_id))
-
                 log.info(f"generating DataView {data_view_id} from {cached_data_view_id}")
-                for transform in remaining_transforms:
-                    df = transform.apply(df)
+                transforms = remaining_transforms
             else:
                 log.info(f"generating DataView {data_view_id} from base")
                 df = self.active_dataframe(data_view)
+                transforms = data_view.transforms
 
-                for transform in data_view.transforms:
-                    df = transform.apply(df)
+            for transform in transforms:
+                if isinstance(transform, FilterTransform):
+                    df = transform.filter(df, self.transform_resource_handler.instance(data_view))
+
+                elif isinstance(transform, EnrichmentTransform):
+                    result = transform.enrich(df, self.transform_resource_handler.instance(data_view))
+
+                    """
+                    column_label, is_sort_ascending = result.sort
+                    if column_label:
+                        df = df.sort_values(by=[column_label], ascending=is_sort_ascending)
+                    """
 
             df_cache[data_view_id] = df
             transforms_by_data_view_id[data_view_id] = data_view.transforms
@@ -144,19 +157,8 @@ class Analyzer:
 
     def _load_data(self, data_view: RichDataView, path: Path) -> DataFrame:
         dataset_reader = self._get_dataset_reader(path)
-
         df = dataset_reader(path)
         df = df.fillna("")
-
-        original_labels = self.get_dataset_labels(data_view.dataset)
-        original_label_names = set([label.name for label in original_labels])
-
-        derived_labels = set(data_view.label_names) - original_label_names
-
-        for label in derived_labels:
-            column = self._column_handler.get_column_by_label(label)
-            column.apply(label, df, sep=". ")
-
         return df
 
     def _get_dataset_reader(self, path: Path) -> Callable[[Path], DataFrame]:
@@ -173,7 +175,7 @@ class Analyzer:
         elif suffix in excel_suffixes:
             return self._load_spreadsheet_data
         else:
-            log.warning('Unrecognized suffix, handling as csv: "%s"', path)
+            log.warning('Unrecognized suffix, handling as csv: "%s"', suffix)
             return self._load_csv_data
 
     @classmethod
@@ -190,20 +192,25 @@ class Analyzer:
         return pd.read_excel(path, na_values=None)
 
     def get_dataset_path(self, data_view: RichDataView) -> Path:
-        return Path(self.data_dir, data_view.dataset.filename)
+        return self.data_dir / data_view.dataset.filename
 
     def active_dataframe(self, data_view: RichDataView) -> DataFrame:
         if self._active_dataframe_by_data_view.get(data_view) is None:
             try:
                 path = self.get_dataset_path(data_view)
-
                 df = self._load_data(path=path, data_view=data_view)
                 self._active_dataframe_by_data_view[data_view] = df
             except Exception as exc:
                 log.error(exc)
         return self._active_dataframe_by_data_view.get(data_view)
 
-    def raw_data_for_data_view(self, data_view: RichDataView, limit: Optional[int] = None):
+    def raw_data_for_data_view(
+        self,
+        data_view: RichDataView,
+        sort_label: Optional[str] = None,
+        sort_asc: Optional[bool] = None,
+        limit: Optional[int] = None,
+    ) -> Dict:
         limit = limit or self.DEFAULT_LIMIT
 
         start_get_df = time()
@@ -213,6 +220,15 @@ class Analyzer:
         if df is None:
             log.info("df is None")
             return None
+
+        df.columns = df.columns.str.strip()
+
+        if sort_label:
+            df.sort_values(
+                by=sort_label,
+                inplace=True,
+                ascending=sort_asc,
+            )
 
         return df[:limit].T.to_dict()
 
