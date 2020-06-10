@@ -9,7 +9,7 @@ chardet==3.0.4
 click==7.1.1
 colorama==0.4.3; sys_platform == "win32"
 cymem==2.0.3
-https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-2.2.5/en_core_web_lg-2.2.5.tar.gz
+# https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-2.2.5/en_core_web_lg-2.2.5.tar.gz
 flask==1.1.1
 flask-cors==1.10.2
 idna==2.9
