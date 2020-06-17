@@ -12,7 +12,7 @@ log = logging.getLogger(__name__)
 
 SPACE = " "
 
-
+'''
 class BaseDerivedColumn:
     def __init__(self, column_labels: List[str]):
         self.column_labels = column_labels
@@ -71,12 +71,12 @@ class StringConcatenatedColumn(BaseDerivedColumn):
         df[name] = df[name].str.replace(repeated_sep, sep)
 
 
+
 active_column_cls_list = [
     StringConcatenatedColumn,
 ]
 
 column_cls_by_type = {column_cls.type(): column_cls for column_cls in active_column_cls_list}
-
 
 class ColumnHandler:
     """
@@ -104,3 +104,4 @@ class ColumnHandler:
 
         derived_column = column_cls(**params)
         return derived_column
+'''

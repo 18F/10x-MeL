@@ -14,7 +14,7 @@ from analyzer.data_view.handler import DataViewHandler
 from analyzer.dataset.handler import DatasetHandler
 from analyzer.users.users_lib import UserHandler
 
-from analyzer.data_view.data_view_lib import Label, LabelSet, DataViewId
+from analyzer.data_view.data_view_lib import Label, LabelSequence, DataViewId
 from analyzer.data_view.rich_data_view import RichDataView
 from analyzer.dataset.dataset_lib import Dataset, DatasetId
 from analyzer.constraint_lib import (
@@ -215,7 +215,9 @@ class Analyzer:
 
         start_get_df = time()
         df = self._get_df(data_view)
-        log.info("get_df took %s", time() - start_get_df)
+
+        elapsed = time() - start_get_df
+        log.info(f"get_df took {elapsed:.2f} sec")
 
         if df is None:
             log.info("df is None")
@@ -232,11 +234,11 @@ class Analyzer:
 
         return df[:limit].T.to_dict()
 
-    def get_dataset_labels(self, dataset: Dataset) -> LabelSet:
+    def get_dataset_labels(self, dataset: Dataset) -> LabelSequence:
         path = self.data_dir / dataset.filename
 
         dataset_reader = self._get_dataset_reader(path)
-        return LabelSet([Label(name=name) for name in dataset_reader(path).keys()])
+        return LabelSequence([Label(name=name) for name in dataset_reader(path).keys()])
 
     def unique_counts_by_column(self, column: str, data_view: RichDataView) -> Dict[str, int]:
         df = self._get_df(data_view)

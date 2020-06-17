@@ -6,7 +6,7 @@ import logging
 import pandas as pd
 
 from analyzer.utils import Serializable, SerializableType
-from analyzer.constraint_lib import transform_manager, Constraint
+from analyzer.constraint_lib import transform_manager, Transform, TransformList
 
 DataFrame = pd.DataFrame
 
@@ -71,49 +71,49 @@ class QueryErrorResponse(QueryResponse):
 
 
 class Query:
-    def __init__(self, constraints: List[Constraint]):
-        self.constraints = constraints
+    def __init__(self, transforms: TransformList):
+        self.transforms = transforms
 
     def __hash__(self) -> str:
-        return ",".join(sorted(repr(constraint) for constraint in self.constraints))
+        return ",".join(sorted(repr(transform) for transform in self.transforms))
 
     def apply(self, df: DataFrame) -> DataFrame:
         new_df = df
 
         '''
         from functools import partial
-        reduce(lambda result, f: f.apply(result), self.constraints, df)
+        reduce(lambda result, f: f.apply(result), self.transforms, df)
         '''
 
-        for constraint in self.constraints:
-            new_df = constraint.apply(new_df)
+        for transform in self.transforms:
+            new_df = transform.apply(new_df)
         return new_df
 
 
 class QueryParser:
-    KEY_CONSTRAINTS = "constraints"
+    KEY_TRANSFORMS = "transforms"
     KEY_CLASS_NAME = "name"
     KEY_ARGS = "args"
 
     @classmethod
     def from_dict(cls, d: Dict) -> Query:
-        constraint_dicts = d.get(cls.KEY_CONSTRAINTS, [])
-        constraints: List[Constraint] = []
+        transform_dicts = d.get(cls.KEY_TRANSFORMS, [])
+        transforms: TransformList = TransformList()
 
-        for d in constraint_dicts:
+        for d in transform_dicts:
             class_name: List[Dict] = d.get(cls.KEY_CLASS_NAME, None)
             args = d.get(cls.KEY_ARGS, {})
 
             if class_name is None:
-                log.error("Constraint has no class name - skipping: {}".format(d))
+                log.error("Transform has no class name - skipping: {}".format(d))
                 continue
 
-            constraint_cls = transform_manager.constraint_by_name(class_name)
-            constraint = constraint_cls(**args)
-            constraints.append(constraint)
+            transform_cls = transform_manager.transform_by_name(class_name)
+            transform = transform_cls(**args)
+            transforms.append(transform)
 
         return Query(
-            constraints=constraints,
+            transforms=transforms,
         )
 
     @classmethod

@@ -317,9 +317,9 @@ def raw_entries_and_tags_for_data_view():
         return jsonify(dict(error=1, msg=str(exc), entries=-1))
 
 
-@app.route("/get_constraint_defs")
-def get_constraint_defs():
-    return jsonify([c.serialize() for c in session.get_constraint_defs()])
+@app.route("/get_transform_defs")
+def get_transform_defs():
+    return jsonify([c.serialize() for c in session.get_transform_defs()])
 
 
 @app.route("/transform_data_view", methods=["GET"])
