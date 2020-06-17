@@ -17,7 +17,7 @@ DataFrame = pd.DataFrame
 Series = pd.Series
 Timestamp = pd.Timestamp
 
-
+'''
 try:
     nltk.data.find('tokenizers/punkt.zip')
 except LookupError:
@@ -27,6 +27,7 @@ try:
     _ = set(stopwords.words('english'))
 except LookupError:
     nltk.download('stopwords')
+'''
 
 
 class CalendarUtils:

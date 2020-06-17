@@ -26,7 +26,7 @@ class BaseTwoPassSurfacePatternDetector:
     def __init__(
         self,
         name: str,
-        text_column_labels: List[str],
+        text_column_label: str,
         pattern_phase1: Pattern,
         pattern_phase2: Pattern,
         rating_column_labels: List[str],
@@ -34,7 +34,7 @@ class BaseTwoPassSurfacePatternDetector:
     ):
         self.name = name
 
-        self.column_labels = text_column_labels
+        self.text_column_label = text_column_label
         self.rating_column_labels = rating_column_labels
         self.rating_map = rating_map
 
@@ -67,7 +67,7 @@ class BaseTwoPassSurfacePatternDetector:
 
     def _process_text(self, series: Series) -> str:
         text_fields = []
-        for label in self.column_labels:
+        for label in self.text_column_label:
             value = series[label]
             text = "" if pd.isnull(value) or not value else str(value)
             text_fields.append(text)
@@ -243,7 +243,7 @@ class ProblemReportDetector(BaseTwoPassSurfacePatternDetector):
     def __init__(
         self,
         name: str,
-        text_column_labels: List[str],
+        text_column_label: str,
         rating_column_labels: List[str],
         rating_map: Dict[str, Dict[str, int]],
     ):
@@ -251,7 +251,7 @@ class ProblemReportDetector(BaseTwoPassSurfacePatternDetector):
 
         super().__init__(
             name=name,
-            text_column_labels=text_column_labels,
+            text_column_label=text_column_label,
             pattern_phase1=patterns[0],
             pattern_phase2=patterns[1],
             rating_column_labels=rating_column_labels,

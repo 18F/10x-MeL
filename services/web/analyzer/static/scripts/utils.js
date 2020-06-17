@@ -217,6 +217,10 @@ function createButton() {
   return createElement('button', arguments[0]);
 }
 
+function createSelect() {
+  return createElement('select', arguments[0]);
+}
+
 function createDataList() {
   return createElement('datalist', arguments[0]);
 }

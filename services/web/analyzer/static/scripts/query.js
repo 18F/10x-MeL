@@ -3,16 +3,26 @@
 class ParameterDef {
   static TYPE_TEXT = 'text';
   static TYPE_TEXT_LIST = 'text_list';
-  static TYPE_INTEGER = 'int';
+  static TYPE_INT = 'int';
   static TYPE_FLOAT = 'float';
   static TYPE_COLUMN_NAME = 'column_name';
+  static TYPE_COLUMN_NAME_LIST = 'column_name_list';
+  static TYPE_DATE_RANGE = 'date_range';
+  static TYPE_DATE_RANGE_LIST = 'date_range_list';
 
-  static SEPARATOR = ',';
+  static COLLECTION_TYPES = new Set([
+    ParameterDef.TYPE_TEXT_LIST,
+    ParameterDef.TYPE_DATE_RANGE_LIST,
+    ParameterDef.TYPE_COLUMN_NAME_LIST,
+  ]);
 
   static KEY_TYPE = 'type';
   static KEY_NAME = 'name';
   static KEY_LABEL = 'label';
   static KEY_EXAMPLE = 'example';
+
+  static LIST_SEPARATOR = ',';
+  static DATE_RANGE_SEPARATOR = ':';
 
   constructor(type, name, label, example) {
     this.type = type;
@@ -31,33 +41,13 @@ class ParameterDef {
   }
 
   static processValue(rawValue, type) {
-    if (type === ParameterDef.TYPE_TEXT) {
-      return rawValue.toString();
+    return new ValueProcessor(type).process(rawValue);
 
-    } else if (type === ParameterDef.TYPE_COLUMN_NAME) {
-      return rawValue.toString();
 
-    } else if (type === ParameterDef.TYPE_INTEGER) {
-      return parseInt(rawValue);
-
-    } else if (type === ParameterDef.TYPE_FLOAT) {
-      return parseFloat(rawValue);
-
-    } else if (type === ParameterDef.TYPE_TEXT_LIST) {
-      if (typeof rawValue === 'string') {
-        const sep = ParameterDef.SEPARATOR;
-        console.info('processValue TEXT_LIST', rawValue.split(sep).map(s => s.trim()));
-        return rawValue.split(sep).map(s => s.trim())
-      } else {
-        return rawValue;
-      }
-    } else {
-      throw 'Unrecognized Parameter type:' + type;
-    }
   }
 }
 
-class ConstraintDef {
+class TransformDef {
   static KEY_TYPE = 'type';
   static KEY_DESC = 'description';
   static KEY_PARAMS = 'params';
@@ -87,20 +77,20 @@ class ConstraintDef {
   }
 
   static fromDict(dict) {
-    return new ConstraintDef(
-      dict[ConstraintDef.KEY_TYPE],
-      dict[ConstraintDef.KEY_DESC],
-      dict[ConstraintDef.KEY_PARAMS].map(p => ParameterDef.fromDict(p)),
-      dict[ConstraintDef.KEY_OPS],
+    return new TransformDef(
+      dict[TransformDef.KEY_TYPE],
+      dict[TransformDef.KEY_DESC],
+      dict[TransformDef.KEY_PARAMS].map(p => ParameterDef.fromDict(p)),
+      dict[TransformDef.KEY_OPS],
     );
   }
 }
 
 
-class Constraint {
-  constructor(constraintDef, parameters, operation) {
-    console.info(constraintDef, parameters);
-    this._def = constraintDef;
+class Transform {
+  constructor(transformDef, parameters, operation) {
+    console.info(transformDef, parameters);
+    this._def = transformDef;
     this.parameters = parameters;
     this.operation = operation;
   }
@@ -143,13 +133,13 @@ class Constraint {
 
         const key = field.substr(1, field.length - 2);
         paragraph.appendChild(createSpan({
-          cls: 'constraintDescriptionFieldValue',
-          text: this.parameters[key],
+          cls: 'transformDescriptionFieldValue',
+          text: this.parameters[key] || "''",
         }));
 
       } else {
         paragraph.appendChild(createSpan({
-          cls: 'constraintDescriptionFieldOperator',
+          cls: 'transformDescriptionFieldOperator',
           text: field,
         }));
       }
@@ -171,11 +161,16 @@ class Constraint {
 
     const values = [this.type, this.operation];
     for (const parameterDef of parameterDefs) {
+      values.push(new ParameterProcessor(parameters, parameterDef).process());
+      /*
+
       const parameterType = parameterDef.type;
       const parameterName = parameterDef.name;
 
       const value = parameters[parameterName];
       values.push(ParameterDef.processValue(value, parameterType));
+       */
+
     }
 
     return values;
@@ -183,14 +178,14 @@ class Constraint {
 
   static deserialize(values) {
     /*
-    Constraints are serialized as follows:
-      [constraintType, param_0, param_1, ..., param_n]
+    Transforms are serialized as follows:
+      [transformType, param_0, param_1, ..., param_n]
      */
-    const constraintType = values.shift();
+    const transformType = values.shift();
     const operation = values.shift();
 
-    const constraintDef = app.transformManager.constraintDefByType(constraintType);
-    const parameterDefs = constraintDef.parameters;
+    const transformDef = app.transformManager.transformDefByType(transformType);
+    const parameterDefs = transformDef.parameters;
     const parameters = {};
 
     for (const parameterDef of parameterDefs) {
@@ -202,8 +197,8 @@ class Constraint {
       //parameters[parameterName] = values.shift();
     }
 
-    return new Constraint(
-      constraintDef,
+    return new Transform(
+      transformDef,
       parameters,
       operation,
     )
@@ -254,6 +249,12 @@ class DataView {
     this.datasetId = datasetId;
     this.labels = labels;
     this.transforms = transforms;
+
+    this.hiddenLabels = new Set();
+  }
+
+  get activeLabels() {
+    return this.labels.filter(label => !this.hiddenLabels.has(label));
   }
 
   static deserialize(dict) {
@@ -274,7 +275,7 @@ class DataView {
 
     const transformsListDict = dict[KEY_TRANSFORMS] || [];
     console.info('transformsListDict', transformsListDict);
-    const transforms = transformsListDict.map(dict => Constraint.deserialize(dict));
+    const transforms = transformsListDict.map(dict => Transform.deserialize(dict));
 
     return new DataView(
       dataViewId,
@@ -284,5 +285,111 @@ class DataView {
       columnLabels,
       transforms,
     );
+  }
+}
+
+class ParameterProcessor {
+  constructor(parameters, parameterDef) {
+    this.parameters = parameters;
+    this.parameterType = parameterDef.type;
+    this.parameterName = parameterDef.name;
+  }
+
+  process() {
+    const value = this.parameters[this.parameterName];
+    console.info("process >>>", this.parameters, value);
+    return ParameterDef.processValue(value, this.parameterType);
+  }
+}
+
+class ValueProcessor {
+  constructor(parameterType) {
+    this.parameterType = parameterType;
+  }
+
+  processText(value) {
+    return value.toString();
+  }
+
+  processInt(value) {
+    return parseInt(value);
+  }
+
+  processFloat(value) {
+    return parseFloat(value);
+  }
+
+  processTextList(value) {
+    if (typeof value === 'string') {
+      const sep = ParameterDef.LIST_SEPARATOR;
+      console.info('processValue TEXT_LIST', value.split(sep).map(s => s.trim()));
+      return value.split(sep).map(s => s.trim())
+    } else {
+      return value;
+    }
+  }
+
+  processColumnNameList(value) {
+    if (typeof value === 'string') {
+      const sep = ParameterDef.LIST_SEPARATOR;
+      console.info('processValue TEXT_LIST', value.split(sep).map(s => s.trim()));
+      return value.split(sep).map(s => s.trim())
+    } else {
+      return value;
+    }
+  }
+
+  processDateRangeList(value) {
+    if (typeof value === 'string') {
+      const sep = ParameterDef.LIST_SEPARATOR;
+      console.info('processValue TYPE_DATE_RANGE_LIST', value.split(sep).map(s => s.trim()));
+      // return value.split(sep).map(s => ParameterDef.processDatePair(s.trim()));
+      return value.split(sep).map(s => s.trim());
+
+    } else if (Array.isArray(value)) {
+      const result = [];
+      for (const dateRange of value) {
+        result.push(dateRange);
+        /*
+        if (typeof dateRange === 'string') {
+          result.push(ParameterDef.processDatePair(dateRange.trim()));
+        } else {
+          result.push(dateRange)
+        }
+         */
+      }
+      console.info('processValue TYPE_DATE_RANGE_LIST', result);
+      return result;
+
+    } else {
+      return value;
+    }
+
+  }
+  process(rawValue) {
+    switch (this.parameterType) {
+      case ParameterDef.TYPE_TEXT:
+      case ParameterDef.TYPE_COLUMN_NAME:
+      case ParameterDef.TYPE_DATE_RANGE:
+        return this.processText(rawValue);
+
+      case ParameterDef.TYPE_INT:
+        return this.processInt(rawValue);
+
+      case ParameterDef.TYPE_FLOAT:
+        return this.processFloat(rawValue);
+
+      case ParameterDef.TYPE_TEXT_LIST:
+        return this.processTextList(rawValue);
+
+      case ParameterDef.TYPE_COLUMN_NAME_LIST:
+        return this.processColumnNameList(rawValue);
+
+      case ParameterDef.TYPE_DATE_RANGE_LIST:
+        return this.processDateRangeList(rawValue);
+
+      default:
+        throw 'Unrecognized Parameter type:' + this.parameterType;
+    }
   }
 }

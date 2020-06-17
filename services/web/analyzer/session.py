@@ -6,18 +6,17 @@ from time import time
 import logging
 
 from analyzer.analyzer_lib import Analyzer
-from analyzer.constraint_lib import transform_manager, ConstraintDef
+from analyzer.constraint_lib import transform_manager, TransformDef, TransformResourceHandler
 from analyzer.query_processor_lib import QueryResponse, QueryErrorResponse
 from analyzer.dataset.dataset_lib import Dataset, DatasetId
 from analyzer.dataset.handler import DatasetHandler
 from analyzer.data_view.data_view_lib import (
-    DataView, DataViewId, LabelSet, TransformList,
+    DataView, DataViewId, LabelSequence, TransformList,
 )
 from analyzer.data_view.handler import DataViewHandler, DataViewHistoryHandler
 from analyzer.data_view.rich_data_view import RichDataView
 from analyzer.users.users_lib import User, UserHandler, UserId
 from analyzer.transforms.enrichments_lib import TagHandler
-from analyzer.constraint_lib import TransformResourceHandler
 
 
 log = logging.getLogger(__name__)
@@ -117,7 +116,7 @@ class Session:
 
     def rich_data_view(self, data_view_id: DataViewId) -> RichDataView:
         data_view = self.data_view_handler.by_id(data_view_id)
-        log.info("DataView %s from %s", data_view, data_view_id)
+        log.info(f"DataView {data_view} from {data_view_id}")
         return RichDataView(
             data_view=data_view,
             dataset=self.dataset_handler.by_id(data_view.dataset_id),
@@ -128,8 +127,8 @@ class Session:
         self.data_view_handler.load()
 
     @classmethod
-    def get_constraint_defs(cls) -> List[ConstraintDef]:
-        return list(transform_manager.get_constraint_defs())
+    def get_transform_defs(cls) -> List[TransformDef]:
+        return list(transform_manager.get_transform_defs())
 
     def get_most_recent_data_view(
         self,
@@ -165,7 +164,7 @@ class Session:
         parent: Optional[DataViewId],
         user_id: UserId,
         dataset_id: DatasetId,
-        labels: Optional[LabelSet] = None,
+        labels: Optional[LabelSequence] = None,
         transforms: Optional[TransformList] = None,
     ) -> DataView:
         if not labels:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import List, Dict, Optional, Union
+from collections import deque
 from enum import Enum
 import logging
 
@@ -8,7 +9,9 @@ from analyzer.utils import Serializable
 from analyzer.data_view import DataViewId
 from analyzer.dataset.dataset_lib import DatasetId
 from analyzer.users.users_lib import UserId
-from analyzer.constraint_lib import TransformList
+from analyzer.constraint_lib import (
+    TransformList, TransformTree,
+)
 
 
 log = logging.getLogger(__name__)
@@ -95,16 +98,22 @@ class Label(Serializable):
         return False
 
 
-class LabelSet(Serializable, list):
-    def __init__(self, labels: Optional[List[Label]] = None):
-        super().__init__(labels or [])
+class LabelSequence(Serializable, deque):
+    def __init__(self, labels: Optional[Union[List[Label], LabelSequence]] = None):
+        super().__init__(labels or deque())
+
+    def remove_by_name(self, name: str):
+        for elem in self:
+            if elem.name == name:
+                self.remove(elem)
+                break
 
     def serialize(self) -> List[Dict[Union[str, int]]]:
         return [label.serialize() for label in self]
 
     @classmethod
-    def deserialize(cls, lst: List[Dict[str, Union[str, int]]]) -> LabelSet:
-        return LabelSet([Label.deserialize(elem) for elem in lst])
+    def deserialize(cls, lst: List[Dict[str, Union[str, int]]]) -> LabelSequence:
+        return LabelSequence([Label.deserialize(elem) for elem in lst])
 
     def __str__(self) -> str:
         return ", ".join(str(label) for label in self)
@@ -124,42 +133,29 @@ class DataView(Serializable):
         parent_data_view_id: DataViewId,
         dataset_id: DatasetId,
         user_id: UserId,
-        labels: Optional[LabelSet] = None,
+        labels: Optional[LabelSequence] = None,
         transforms: Optional[TransformList] = None,
     ):
         self.id = data_view_id
         self.parent_id = parent_data_view_id
         self.dataset_id = dataset_id
         self.user_id = user_id
-        self._labels = labels or LabelSet()
         self.transforms = transforms or TransformList()
 
+        self._labels = labels or LabelSequence()
+        self._label_by_name: Dict[str, Label] = {}
+
     @property
-    def labels(self) -> LabelSet:
-        labels_seen = set()
-        all_labels = LabelSet()
+    def transform_tree(self) -> TransformTree:
+        return TransformTree.from_transform_list(self.transforms)
 
-        for transform in self.transforms:
-            try:
-                for label_name in transform.labels:
-                    if label_name in labels_seen:
-                        continue
-                    labels_seen.add(label_name)
-                    all_labels.append(Label(label_name))
-            except AttributeError:
-                pass
-
-        for label in self._labels:
-            if label.name in labels_seen:
-                continue
-
-            labels_seen.add(label.name)
-            all_labels.append(label)
-        return all_labels
+    @property
+    def labels(self) -> LabelSequence:
+        return self._labels
 
     def serialize(self) -> Dict[str, str]:
-        labels = self.labels.serialize() if self.labels else LabelSet()
-        transforms = self.transforms.serialize() if self.transforms else TransformList()
+        labels = self.labels.serialize() if self.labels else []
+        transforms = self.transforms.serialize() if self.transforms else []
         return {
             self.KEY_ID: self.id,
             self.KEY_PARENT_ID: self.parent_id,
@@ -175,7 +171,7 @@ class DataView(Serializable):
         parent_data_view_id = DataViewId(d[cls.KEY_PARENT_ID])
         dataset_id = DatasetId(d[cls.KEY_DATASET_ID])
         user_id = UserId(d[cls.KEY_USER_ID])
-        labels = LabelSet.deserialize(d[cls.KEY_COLUMN_LABELS])
+        labels = LabelSequence.deserialize(d[cls.KEY_COLUMN_LABELS])
         transforms = TransformList.deserialize(d[cls.KEY_TRANSFORMS])
 
         return DataView(

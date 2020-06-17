@@ -1,14 +1,17 @@
 from __future__ import annotations
 
-from typing import List, Dict, Optional, Union
+from typing import List, Dict, Deque, Tuple, Optional, Union
+from collections import deque
 from pathlib import Path
 import json
 import logging
 
 from analyzer.data_view.data_view_lib import (
-    DataView, DataViewId, Label, LabelSet,
+    DataView, DataViewId, Label, LabelSequence,
 )
-from analyzer.constraint_lib import Transform, TransformList
+from analyzer.constraint_lib import (
+    Transform, TransformDef, TransformList, EnrichmentTransform, FilterTransform,
+)
 from analyzer.dataset.dataset_lib import Dataset, DatasetId
 from analyzer.users.users_lib import User, UserId
 
@@ -168,7 +171,7 @@ class DataViewHandler(SerializableHandler):
         parent: Optional[Union[DataView, DataViewId]],
         user: Union[User, UserId],
         dataset: Union[Dataset, DatasetId],
-        labels: LabelSet,
+        labels: LabelSequence,
         transforms: Optional[TransformList] = None,
     ) -> DataView:
         log.debug("DataViewHandler.create")
@@ -267,39 +270,86 @@ class DataViewHandler(SerializableHandler):
         except KeyError:
             return Label(name=name)
 
+    @classmethod
+    def _delete_transform_from_data_view(
+        cls,
+        transform: Transform,
+        updated_transforms: TransformList,
+        updated_labels: LabelSequence,
+        data_view: DataView,
+    ) -> Tuple[TransformList, LabelSequence]:
+        log.info(f"Removing transform from {data_view.id}")
+        transform_tree = data_view.transform_tree
+
+        updated_transforms = TransformList(updated_transforms)
+        updated_labels = LabelSequence(updated_labels)
+
+        # the transforms queued for removal
+        del_transforms: Deque[Transform] = deque([transform])
+        while del_transforms:
+            log.info(f"about to pop {del_transforms[0]}")
+            transform = del_transforms.popleft()
+
+            if isinstance(transform, EnrichmentTransform):
+                for label_name in transform.output_labels:
+                    log.info(f"removing by name {label_name}")
+                    updated_labels.remove_by_name(label_name)
+
+                del_transforms.extend(transform_tree.get_children_of_transform(transform))
+            log.info(f"removing transform: {transform.serialize()}")
+            updated_transforms.remove(transform)
+
+        return updated_transforms, updated_labels
+
+    @classmethod
+    def _add_transform_to_data_view(
+        cls,
+        transform: Transform,
+        updated_transforms: TransformList,
+        updated_labels: LabelSequence,
+        data_view: DataView,
+    ) -> Tuple[TransformList, LabelSequence]:
+        log.info(f"Adding transform to {data_view.id}")
+        updated_transforms = TransformList(updated_transforms)
+        updated_labels = LabelSequence(updated_labels)
+
+        updated_transforms.append(transform)
+
+        if isinstance(transform, EnrichmentTransform):
+            updated_labels.extendleft([Label(name) for name in transform.output_labels])
+
+        return updated_transforms, updated_labels
+
     def transform_data_view(
         self,
         data_view_id: DataViewId,
         add_transforms: Optional[List[Transform]] = None,
         del_transforms: Optional[List[Transform]] = None,
-        labels: Optional[LabelSet] = None,
     ) -> DataView:
-        data_view = self.by_id(data_view_id)
 
+        data_view = self.by_id(data_view_id)
         if data_view is None:
             raise ValueError(f"Could not find DataView for id {data_view_id}")
 
-        augmented_transforms = TransformList(data_view.transforms)
+        updated_transforms = TransformList(data_view.transforms)
+        updated_labels = LabelSequence(data_view.labels)
 
-        if del_transforms:
-            for del_transform in del_transforms:
-                for transform in augmented_transforms:
-                    if del_transform.serialize() == transform.serialize():
-                        augmented_transforms.remove(transform)
-                        break
-                else:
-                    log.error(
-                        "Failed to remove %s from %s", del_transform, augmented_transforms,
-                    )
-
-        if add_transforms:
-            for add_transform in add_transforms:
-                augmented_transforms.append(add_transform)
+        for transforms, apply_change in [
+            (del_transforms or [], self._delete_transform_from_data_view),
+            (add_transforms or [], self._add_transform_to_data_view),
+        ]:
+            for transform in transforms:
+                updated_transforms, updated_labels = apply_change(
+                    transform,
+                    updated_transforms,
+                    updated_labels,
+                    data_view,
+                )
 
         # see if this DataView already exists
         serialization = self._serialize_for_cache(
             data_view.dataset_id,
-            augmented_transforms,
+            updated_transforms,
         )
 
         existing_id = self._data_view_id_by_serialization.get(serialization, None)
@@ -312,6 +362,6 @@ class DataViewHandler(SerializableHandler):
             parent=data_view_id,
             user=data_view.user_id,
             dataset=data_view.dataset_id,
-            labels=labels or data_view.labels,
-            transforms=augmented_transforms,
+            labels=updated_labels,
+            transforms=updated_transforms,
         )

@@ -6,7 +6,6 @@ class DataViewManager {
 
   constructor() {
     this._entries = [];
-    this.labelsHidden = new Set();
   }
 
   init() {
@@ -104,9 +103,7 @@ class DataViewManager {
       console.info('Cannot display data, dataView is', this.dataView);
     }
     const entries = this.entries;
-    const labelsHidden = this.labelsHidden;
-    const labels = this.dataView.labels.filter(label => !labelsHidden.has(label));
-
+    const labels = app.dataView.activeLabels;
     emptyElement(dataViewTable);
 
     if ((isIterable(labels) === false) || (objHasEntries(entries) === false)) {
@@ -282,7 +279,8 @@ class DataViewManager {
         text: 'hide',
         mousedown: e => ifPrimaryClick(e, () => {
           cleanup();
-          this.labelsHidden.add(label);
+          console.info("HIDE", this);
+          this.hideLabel(label);
           this.refreshDataView();
         }),
       })
@@ -296,6 +294,20 @@ class DataViewManager {
     container.appendChild(window);
 
     document.body.appendChild(container);
+  }
+
+  hideLabel(label) {
+    app.dataView.hiddenLabels.add(label);
+    return this.updateLabels();
+  }
+
+  showLabel(label) {
+    app.dataView.hiddenLabels.delete(label);
+    return this.updateLabels();
+  }
+
+  async updateLabels() {
+
   }
 
   /**
@@ -453,7 +465,6 @@ class TagManager {
           console.info(e);
           hide(tagContainer);
           this.removeTags([tag], primaryKey);
-          app.dataViewManager.updateDataView();
           e.stopPropagation();
           e.stopImmediatePropagation();
         }),
@@ -514,6 +525,7 @@ class TagManager {
       if (!result.error) {
         console.info("Successfully removed", tagNames, "from", primaryKey, "in", this.primaryKeyName);
 
+        await app.dataViewManager.updateDataView();
       } else {
         console.error('fetchBarData error', result.error);
       }
