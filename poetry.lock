@@ -129,6 +129,7 @@ spacy = ">=2.2.2"
 reference = ""
 type = "url"
 url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-2.2.5/en_core_web_lg-2.2.5.tar.gz"
+
 [[package]]
 category = "main"
 description = "A simple framework for building complex web applications."
@@ -154,7 +155,7 @@ description = "A Flask extension adding a decorator for CORS support"
 name = "flask-cors"
 optional = false
 python-versions = "*"
-version = "1.10.2"
+version = "3.0.8"
 
 [package.dependencies]
 Flask = ">=0.9"
@@ -624,7 +625,7 @@ docs = ["sphinx", "jaraco.packaging (>=3.2)", "rst.linker (>=1.9)"]
 testing = ["jaraco.itertools", "func-timeout"]
 
 [metadata]
-content-hash = "1fd4aac3e96c38175d49b9a637ee7381889a039e75886b71cca5c1e9708a9687"
+content-hash = "6419a33f7e7a56c9bb5bde9cdd64452a0321d3d1a34b5a1d335371389d27723f"
 python-versions = "^3.7"
 
 [metadata.files]
@@ -702,9 +703,8 @@ flask = [
     {file = "Flask-1.1.1.tar.gz", hash = "sha256:13f9f196f330c7c2c5d7a5cf91af894110ca0215ac051b5844701f2bfd934d52"},
 ]
 flask-cors = [
-    {file = "Flask-Cors-1.10.2.tar.gz", hash = "sha256:8e52160840aee8cdbde56e3f04baa02f598aac4dab2ff07f69a9b781e909bb49"},
-    {file = "Flask_Cors-1.10.2-py2-none-any.whl", hash = "sha256:9a0d7e4a060b3313966da5f89e2a2f60a78137f88af9257d9cbc7f0b8b8252bd"},
-    {file = "Flask_Cors-1.10.2-py3-none-any.whl", hash = "sha256:c65eb97560fb1868d5f128fe3bb27f8dbb3ecd18b3d9b3064773ab54d8260d46"},
+    {file = "Flask-Cors-3.0.8.tar.gz", hash = "sha256:72170423eb4612f0847318afff8c247b38bd516b7737adfc10d1c2cdbb382d16"},
+    {file = "Flask_Cors-3.0.8-py2.py3-none-any.whl", hash = "sha256:f4d97201660e6bbcff2d89d082b5b6d31abee04b1b3003ee073a6fd25ad1d69a"},
 ]
 idna = [
     {file = "idna-2.9-py2.py3-none-any.whl", hash = "sha256:a068a21ceac8a4d63dbfd964670474107f541babbd2250d61922f029858365fa"},
