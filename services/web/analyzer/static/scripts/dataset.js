@@ -28,28 +28,45 @@ class DatasetManager {
 
     const initEventHandlers = () => {
       const datasetWindow = this.datasetWindow;
-      const datasetSelectionWindow = this.datasetSelectionWindow;
 
-      datasetWindow.addEventListener('mouseenter', () => {
+      datasetWindow.addEventListener('mouseenter', e => {
+        if (!datasetWindow.active && e.pageX > 100) {
+          return;
+        }
+
+        datasetWindow.active = 1;
+
         if (!config.datasetsLoaded) {
           console.info('loading selection');
           this.initDatasetSelection();
           config.datasetsLoaded = true;
         }
 
-        this.setActiveDatasetColor(Color.WHITE, Color.GREY64);
-        show(datasetSelectionWindow);
-        this.windowHeight = datasetWindow.scrollHeight;
+        this.show();
+
       }, true);
 
       datasetWindow.addEventListener('mouseout', () => {
-        this.setActiveDatasetColor(Color.GREY32, Color.WHITE);
-        this.windowHeight = config.activeDatasetHeight;
+        datasetWindow.active = 0;
+        this.hide();
       }, true);
     };
 
     console.groupEnd();
     return Promise.all([initElements(), initAppearance(), initEventHandlers()]);
+  }
+
+  hide() {
+    this.setActiveDatasetColor(Color.GREY32, Color.WHITE);
+    this.windowHeight = config.activeDatasetHeight;
+
+  }
+
+  show() {
+    this.setActiveDatasetColor(Color.WHITE, Color.GREY64);
+    show(this.datasetSelectionWindow);
+    this.windowHeight = this.datasetWindow.scrollHeight;
+
   }
 
   set windowHeight(height) {
@@ -91,7 +108,8 @@ class DatasetManager {
         text: datasetName,
         cls: 'datasetEntry',
         mousedown: e => ifPrimaryClick(e, () => {
-          return this.setDataset(datasetName);
+          this.hide();
+          this.setDataset(datasetName);
         }),
       }));
     }
@@ -125,3 +143,4 @@ class DatasetManager {
     }
   }
 }
+

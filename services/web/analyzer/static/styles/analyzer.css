@@ -20,18 +20,19 @@ textarea {
     box-shadow: 0 0 4px #666;
 }
 
-input {
+input, select {
     font-size: 16px;
     font-family: 'Helvetica Neue', 'Helvetica', 'sans-serif';
     padding: 10px;
     border: 1px solid rgba(128,128,128,0.5);
+    -webkit-appearance: none;
 }
 
 .modal {
     position: absolute;
 }
 
-#constraintListTable {
+#transformListTable {
     padding: 5px 20px;
     border-spacing: 0;
     border-collapse: collapse;
@@ -42,6 +43,11 @@ input {
     background: none;
 }
 
+.transformAddArgumentButton {
+    font-size: 16px;
+    height: 30px;
+    width: 30px;
+}
 
 #chartWindow {
     position: fixed;
@@ -198,17 +204,17 @@ input {
     padding: 20px;
 }
 
-#constraintType {
+#transformType {
     font-size: 14px;
     font-weight: bold;
 }
 
-#constraintCreationWindow {
+#transformCreationWindow {
     margin: 5px;
 
 }
 
-#constraintArgumentSpecificationContainer {
+#transformArgumentSpecificationContainer {
     padding-left: 25px;
 
 }
@@ -221,7 +227,7 @@ input {
     height: 30px;
 }
 
-#closeAddConstraintButton {
+#closeAddTransformButton {
     font-size: 16px;
     padding: 5px;
     margin: 5px;
@@ -230,12 +236,12 @@ input {
 }
 
 
-.constraintEntry {
+.transformEntry {
     display: inline-flex;
     margin: 5px;
 }
 
-.removeConstraintButton {
+.removeTransformButton {
     padding: 0;
     background: none;
     border: none;
@@ -244,16 +250,16 @@ input {
     cursor: pointer;
 }
 
-.constraintDescriptionFieldValue {
+.transformDescriptionFieldValue {
     font-weight: bold;
 }
 
-.constraintListDescription {
+.transformListDescription {
     font-size: 14px;
     padding: 0 20px 0 0;
 }
 
-.constraintListType {
+.transformListType {
     border: 1px solid rgba(128,128,128,0.5);
     color: rgb(24,24,24);
     border-radius: 5px;
@@ -266,19 +272,24 @@ input {
 }
 
 
-.constraintArgumentTable {
+.transformArgumentTable {
     margin: 20px;
 }
 
-.constraintArgumentLabel {
+.transformArgumentTable select {
+    max-width: 250px;
+}
+
+
+.transformArgumentLabel {
     padding: 10px;
 }
 
-.constraintArgumentExample {
+.transformArgumentExample {
     font-style: italic;
 }
 
-.constraintArgumentExample::before {
+.transformArgumentExample::before {
     content: "ex:  ";
 }
 
@@ -391,8 +402,7 @@ input {
     overflow-wrap: break-word;
     overflow-wrap: anywhere;
      */
-    word-break: break-all;
-
+    word-break: break-word;
     text-overflow: ellipsis;
 }
 

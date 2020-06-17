@@ -7,7 +7,7 @@ const services = {
   listDatasets: 'list_datasets',
   setMostRecentDataset: 'set_most_recent_dataset',
   getDataViewId: 'get_data_view_id',
-  getConstraintDefs: 'get_constraint_defs',
+  getTransformDefs: 'get_transform_defs',
   mostRecentDataView: 'most_recent_data_view',
   rawDataForDataView: 'raw_data_for_data_view',
   rawEntriesAndTagsForDataView: 'raw_entries_and_tags_for_data_view',
@@ -29,11 +29,11 @@ const AVAILABLE_CHART_TYPES = ['bar', 'line', 'historicalWords'];
 const PAYLOAD_KEY = "q";
 
 
-const ConstraintType = {
+const TransformType = {
   FILTER: 'filter',
   ENRICHMENT: 'enrich',
 };
-Object.freeze(ConstraintType);
+Object.freeze(TransformType);
 
 const DEFAULT_USER_ID = 1;
 
@@ -77,8 +77,8 @@ function handleNoServerFound() {
 }
 
 class App {
-  static constraintListWindowId = 'constraintListWindow';
-  static constraintListTableId = 'constraintListTable';
+  static transformListWindowId = 'transformListWindow';
+  static transformListTableId = 'transformListTable';
 
   static datasetWindowId = 'datasetWindow';
   static activeDatasetWindowId = 'activeDatasetWindow';
@@ -91,9 +91,9 @@ class App {
   static chart2CloseButtonId = 'chart2__closeButton';
   static chart3CloseButtonId = 'chart3__closeButton';
 
-  static buildConstraintWindowId = 'buildConstraintWindow';
+  static buildTransformWindowId = 'buildTransformWindow';
   static buildVisualizationWindowId = 'buildVisualizationWindow';
-  static addConstraintWindowId = 'addConstraintWindow';
+  static addTransformWindowId = 'addTransformWindow';
   static addFilterButtonId = 'addFilterButton';
   static addEnrichmentButtonId = 'addEnrichmentButton';
   static addVisualizationButtonId = 'addVisualizationButton';
@@ -120,14 +120,14 @@ class App {
     Object.seal(this.chartManager);
 
     this.transformManager = new TransformManager(
-      App.buildConstraintWindowId,
+      App.buildTransformWindowId,
       App.buildVisualizationWindowId,
-      App.addConstraintWindowId,
+      App.addTransformWindowId,
       App.addFilterButtonId,
       App.addEnrichmentButtonId,
       App.addVisualizationButtonId,
-      App.constraintListWindowId,
-      App.constraintListTableId,
+      App.transformListWindowId,
+      App.transformListTableId,
     );
     Object.seal(this.transformManager);
 
@@ -158,7 +158,7 @@ class App {
     const displayCharts = chartManager.initDisplayCharts.bind(chartManager);
 
     const initAppearance = () => {
-      hide(document.getElementById(App.buildConstraintWindowId));
+      hide(document.getElementById(App.buildTransformWindowId));
       transformManager.showAddWindow();
       const chartWindow = document.getElementById('chartWindow');
 
@@ -214,14 +214,14 @@ class App {
 
   update() {
     console.group('DataViewManager.update');
-    const updateConstraintList = this.transformManager.updateConstraintList.bind(this.transformManager);
+    const updateTransformList = this.transformManager.updateTransformList.bind(this.transformManager);
     const updateDataView = this.dataViewManager.updateDataView.bind(this.dataViewManager);
     const updateCharts = this.chartManager.update.bind(this.chartManager);
 
     const announce = () => { console.info(app.dataView); };
 
     const doUpdate = async () => {
-      await updateConstraintList();
+      await updateTransformList();
       await Promise.all([updateDataView(), await updateCharts()]);
       await announce();
     };

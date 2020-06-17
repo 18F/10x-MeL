@@ -139,8 +139,9 @@ function processTfIdfOverValuesData(data, chart) {
 
 
 async function fetchWordCountsOverTimeData(parameters, dataViewId, chart) {
+  console.info('!!!!!!', parameters);
   const url = buildRequest(services.wordCountsOverTime, {
-    'text_column': parameters['columnNameText'],
+    'text_column': parameters['column'],
     'date_time_column': parameters['columnNameDateTime'],
     'data_view_id': dataViewId,
   });
@@ -427,8 +428,8 @@ class ChartManager {
       columnNameCategory: 'pageType',
     });
     this.createChart(Chart.TYPE_HISTORICAL_WORDS, {
-      columnNameText: 'Text',
-      columnNameDateTime: 'StartDate',
+      text_column_name: 'Text',
+      date_time_column_name: 'StartDate',
     });
     this.createChart(Chart.TYPE_LINE, {column: 'Q2'});
 
@@ -440,6 +441,7 @@ class ChartManager {
       textColumn: 'Q5', dataTimeColumn: 'StartDate'
     });
   */
+
   }
 
   createChart(type, parameters) {
@@ -524,71 +526,3 @@ class ChartManager {
     }
   }
 }
-
-const categories = {
-"passports": [
-  "application",
-  "renewal",
-  "forms",
-  "process",
-  "visas",
-  "help",
-  "vacation",
-  "travel",
-  "wizard",
-  "expiration",
-  "post office",
-],
-  "coronavirus": [
-  "stimulus/check",
-  "outbreak",
-  "local",
-  "concern",
-  "task force",
-  "closed",
-  "businesses",
-],
-  "voting": [
-  "elections",
-  "registration",
-  "officials",
-  "selective service",
-  "absentee",
-  "driver license",
-],
-  "jobs": [
-  "small business",
-  "fraud",
-  "scams",
-  "applications",
-  "unemployment",
-  "compensation",
-  "benefits",
-],
-  "money": [
-  "unclaimed",
-  "credit report",
-  "social security",
-  "fraud",
-  "scam",
-  "phishing",
-],
-  "license": [
-  "marriage",
-  "birth",
-  "replacement birth certificate",
-  "social security card",
-  "replacement",
-],
-  "tax": [
-  "refund",
-  "direct deposit",
-  "state",
-  "website",
-  "federal tax refund",
-  "clear instruction",
-  "credit card",
-  "consumer action",
-  "low income",
-  ]
-};

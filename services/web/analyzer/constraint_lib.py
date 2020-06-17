@@ -1,7 +1,10 @@
 from __future__ import annotations
+from abc import ABC, abstractmethod
 
-from typing import List, Dict, Tuple, Iterable, Union, Type, Optional
-from collections import defaultdict
+from typing import List, Set, Dict, Tuple, Iterable, Union, Type, Optional
+from time import time
+from collections import defaultdict, deque
+from datetime import datetime
 import logging
 import json
 import pandas as pd
@@ -12,6 +15,7 @@ from analyzer.contrib.problem_detector import (
     ResponseMapper,
 )
 from analyzer.transforms.enrichments_lib import TagHandler, TagMap, DatasetId
+from analyzer.contrib.autocat_lib import autocat_handler
 
 Value = Union[str, float]
 
@@ -30,6 +34,9 @@ class Parameter(Serializable):
     TYPE_INT = "int"
     TYPE_FLOAT = "float"
     TYPE_COLUMN_NAME = "column_name"
+    TYPE_COLUMN_NAME_LIST = "column_name_list"
+    TYPE_DATE_RANGE = "date_range"
+    TYPE_DATE_RANGE_LIST = "date_range_list"
 
     KEY_TYPE = "type"
     KEY_NAME = "name"
@@ -80,20 +87,38 @@ class ColumnNameParameter(Parameter):
         super().__init__(Parameter.TYPE_COLUMN_NAME, name, label, example)
 
 
-class ConstraintDef(Serializable):
+class ColumnNameListParameter(Parameter):
+    def __init__(self, name: str, label: str, example: str):
+        super().__init__(Parameter.TYPE_COLUMN_NAME_LIST, name, label, example)
+
+
+class DateRangeParameter(Parameter):
+    def __init__(self, name: str, label: str, example: str):
+        super().__init__(Parameter.TYPE_DATE_RANGE, name, label, example)
+
+
+class DateRangeListParameter(Parameter):
+    def __init__(self, name: str, label: str, example: str):
+        super().__init__(Parameter.TYPE_DATE_RANGE_LIST, name, label, example)
+
+
+class TransformDef(Serializable):
     KEY_TYPE = "type"
     KEY_DESC = "description"
     KEY_PARAMETERS = "params"
     KEY_OPS = "ops"
 
+    OPERATION_FILTER = "filter"
+    OPERATION_ENRICH = "enrich"
+
     def __init__(
         self,
-        constraint_type: str,
+        transform_type: str,
         description: List[str],
         parameters: List[Parameter],
         operations: List[str],
     ):
-        self.type = constraint_type
+        self.type = transform_type
         self.description = description
         self.parameters = parameters
         self.operations = operations
@@ -108,23 +133,94 @@ class ConstraintDef(Serializable):
 
     @classmethod
     def deserialize(cls, d: SerializableType):
-        return ConstraintDef(
-            constraint_type=d[cls.KEY_TYPE],
+        return TransformDef(
+            transform_type=d[cls.KEY_TYPE],
             description=d[cls.KEY_DESC],
             parameters=[p.deserialize() for p in d[cls.KEY_PARAMETERS]],
             operations=[op for op in d[cls.KEY_OPS]],
         )
 
 
+class TransformTree:
+    def __init__(self):
+        self._node_by_transform: Dict[Transform, TransformNode] = {}
+
+    def add_node(self, transform: Transform):
+        self._node_by_transform[transform] = TransformNode(transform)
+
+    def add_edge(self, parent_transform: Transform, child_transform: Transform):
+        parent_node = self._node_by_transform[parent_transform]
+        child_node = self._node_by_transform[child_transform]
+        parent_node.add_child(child_node)
+        child_node.add_parent(parent_node)
+
+    def get_parents_of_transform(self, transform: Transform) -> Set[Transform]:
+        return {node.transform for node in self._node_by_transform[transform].parent_nodes}
+
+    def get_children_of_transform(self, transform: Transform) -> Set[Transform]:
+        return {node.transform for node in self._node_by_transform[transform].child_nodes}
+
+    @classmethod
+    def from_transform_list(cls, transforms: TransformList) -> TransformTree:
+        tree = cls()
+
+        # add each transform to the tree
+        for transform in transforms:
+            tree.add_node(transform)
+
+        # get a mapping of all output labels to the transform that produces them
+        transform_by_label = {}
+        for transform in transforms:
+            if isinstance(transform, EnrichmentTransform):
+                for label in transform.output_labels:
+                    assert label not in transform_by_label, f"DUPLICATE LABEL: {label}"
+                    transform_by_label[label] = transform
+
+        # get a mapping from each transform to the transform it depends on (its parents)
+        for transform in transforms:
+            for label in transform.input_labels:
+                if label in transform_by_label:
+                    parent_transform = transform_by_label[label]
+                    tree.add_edge(parent_transform, transform)
+
+        return tree
+
+
+class TransformNode:
+    def __init__(
+        self,
+        transform: Transform,
+        parent_nodes: Optional[Set[TransformNode]] = None,
+        child_nodes: Optional[Set[TransformNode]] = None,
+    ):
+        self.transform = transform
+        self._parent_nodes = parent_nodes or set()
+        self._child_nodes = child_nodes or set()
+
+    def add_child(self, child_node: TransformNode):
+        self._child_nodes.add(child_node)
+
+    def add_parent(self, parent_node: TransformNode):
+        self._parent_nodes.add(parent_node)
+
+    @property
+    def child_nodes(self) -> Set[TransformNode]:
+        return self._child_nodes
+
+    @property
+    def parent_nodes(self) -> Set[TransformNode]:
+        return self._parent_nodes
+
+
 class TransformManager:
-    operations = {"filter", "enrich"}
+    operations = {TransformDef.OPERATION_FILTER, TransformDef.OPERATION_ENRICH}
 
     def __init__(self):
-        self._transform_by_name: Dict[str, ConstraintType] = {}
-        self._transforms_by_operation: Dict[str, List[ConstraintType]] = defaultdict(list)
-        self._operations_by_transform: Dict[ConstraintType, List[str]] = defaultdict(list)
+        self._transform_by_name: Dict[str, TransformType] = {}
+        self._transforms_by_operation: Dict[str, List[TransformType]] = defaultdict(list)
+        self._operations_by_transform: Dict[TransformType, List[str]] = defaultdict(list)
 
-    def register(self, transform_cls: ConstraintType):
+    def register(self, transform_cls: TransformType):
         self._transform_by_name[transform_cls.type()] = transform_cls
 
         for operation in self.operations:
@@ -135,23 +231,23 @@ class TransformManager:
             except AttributeError:
                 pass
 
-    def constraint_by_name(self, name: str) -> ConstraintType:
+    def transform_by_name(self, name: str) -> TransformType:
         return self._transform_by_name[name]
 
-    def get_constraints(self) -> Iterable[ConstraintType]:
+    def get_transforms(self) -> Iterable[TransformType]:
         return self._transform_by_name.values()
 
-    def get_constraint_defs(self) -> Iterable[ConstraintDef]:
+    def get_transform_defs(self) -> Iterable[TransformDef]:
         for transform in self._transform_by_name.values():
-            yield ConstraintDef(
-                constraint_type=transform.type(),
+            yield TransformDef(
+                transform_type=transform.type(),
                 description=transform.description(),
                 parameters=transform.parameters(),
                 operations=self._operations_by_transform[transform]
             )
 
 
-# a singleton for constraint class registration
+# a singleton for transform class registration
 transform_manager = TransformManager()
 
 
@@ -180,9 +276,9 @@ class TransformResource:
         self.dataset_id = dataset_id
 
 
-class ConstraintList(Serializable, list):
-    def __init__(self, constraints: Optional[List[Constraint]] = None):
-        super().__init__(constraints or [])
+class TransformList(Serializable, deque):
+    def __init__(self, transforms: Optional[Union[List[Transform], TransformList]] = None):
+        super().__init__(transforms or deque())
 
     def __eq__(self, other):
         if len(self) != len(other):
@@ -193,21 +289,25 @@ class ConstraintList(Serializable, list):
         return True
 
     def serialize(self) -> List[List[str]]:
-        return [constraint.serialize() for constraint in self]
+        return [transform.serialize() for transform in self]
 
     @classmethod
-    def deserialize(cls, lst: List[List[Union[str, int]]]) -> ConstraintList:
-        return ConstraintList([Constraint.deserialize(elem) for elem in lst])
+    def deserialize(cls, lst: List[List[Union[str, int]]]) -> TransformList:
+        return TransformList([Transform.deserialize(elem) for elem in lst])
 
 
-class Constraint(Serializable):
+class Transform(Serializable, ABC):
     KEY_TYPE = "type"
     KEY_DESC = "description"
     KEY_PARAMETERS = "params"
 
+    def __init__(self, operation: str):
+        self._operation = operation
+
     @staticmethod
+    @abstractmethod
     def type() -> str:
-        return "Base"
+        pass
 
     def __eq__(self, other):
         try:
@@ -216,87 +316,69 @@ class Constraint(Serializable):
             return False
 
     @property
+    @abstractmethod
+    def input_labels(self) -> Set[str]:
+        pass
+
+    @property
     def operation(self) -> str:
-        raise NotImplementedError()
+        return self._operation
 
     @staticmethod
+    @abstractmethod
     def description() -> List[str]:
-        raise NotImplementedError()
+        pass
 
     @staticmethod
+    @abstractmethod
     def parameters() -> List[Parameter]:
-        raise NotImplementedError()
+        pass
 
-    def __repr__(self):
-        raise NotImplementedError()
+    @abstractmethod
+    def __repr__(self) -> str:
+        pass
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash(json.dumps(self.serialize()))
 
-    @classmethod
-    def serialize(cls) -> Dict:
-        raise NotImplementedError()
+    @abstractmethod
+    def serialize(self) -> Dict:
+        pass
 
     @classmethod
-    def deserialize(cls, lst: List) -> Constraint:
-        constraint_cls = transform_manager.constraint_by_name(lst[0])
-        return constraint_cls.deserialize(lst)
+    def deserialize(cls, lst: List) -> Transform:
+        transform_cls = transform_manager.transform_by_name(lst[0])
+        return transform_cls.deserialize(lst)
 
 
-class FilterTransform(Constraint):
+class FilterTransform(Transform, ABC):
+    @abstractmethod
     def filter(self, df: DataFrame, resources: TransformResource = None) -> bool:
-        raise NotImplementedError()
-
-    @property
-    def operation(self) -> str:
-        raise NotImplementedError()
-
-    @staticmethod
-    def description() -> List[str]:
-        raise NotImplementedError()
-
-    @staticmethod
-    def parameters() -> List[Parameter]:
-        raise NotImplementedError()
-
-    def __repr__(self):
-        raise NotImplementedError()
+        pass
 
     @classmethod
-    def serialize(cls) -> Dict:
-        raise NotImplementedError()
+    @abstractmethod
+    def deserialize(cls, data):
+        pass
 
 
-class EnrichmentTransform(Constraint):
+class EnrichmentTransform(Transform, ABC):
+    @abstractmethod
     def enrich(self, df: DataFrame, resources: TransformResource = None) -> EnrichmentResult:
-        raise NotImplementedError()
-
-    @property
-    def operation(self) -> str:
-        raise NotImplementedError()
-
-    @property
-    def labels(self) -> List[str]:
-        raise NotImplementedError()
-
-    @staticmethod
-    def description() -> List[str]:
-        raise NotImplementedError()
-
-    @staticmethod
-    def parameters() -> List[Parameter]:
-        raise NotImplementedError()
-
-    def __repr__(self):
-        raise NotImplementedError()
+        pass
 
     @classmethod
-    def serialize(cls) -> Dict:
-        raise NotImplementedError()
+    @abstractmethod
+    def deserialize(cls, data):
+        pass
+
+    @property
+    @abstractmethod
+    def output_labels(self) -> List[str]:
+        pass
 
 
-Transform = Constraint
-ConstraintType = Type[Constraint]
+TransformType = Type[Transform]
 
 
 @register
@@ -304,20 +386,20 @@ class ExactMatch(FilterTransform):
     KEY_COLUMN = "column"
     KEY_VALUE = "value"
 
-    def __init__(self, key: str, value: Value, operation: str):
-        self.key = key
+    def __init__(self, column_name: str, value: Value, operation: str):
+        self.column_name = column_name
         self.value = value
-        self._operation = operation
+        super().__init__(operation)
 
     @property
-    def operation(self) -> str:
-        return self._operation
+    def input_labels(self) -> Set[str]:
+        return {self.column_name}
 
     def filter(self, df: DataFrame, resources: TransformResource = None) -> bool:
-        return df[df[self.key].astype(str) == self.value]
+        return df[df[self.column_name].astype(str) == self.value]
 
     def __repr__(self) -> str:
-        return "{}:{}={}".format(self.type(), self.key, self.value)
+        return "{}:{}={}".format(self.type(), self.column_name, self.value)
 
     @staticmethod
     def type() -> str:
@@ -325,54 +407,42 @@ class ExactMatch(FilterTransform):
 
     @staticmethod
     def description() -> List[str]:
-        return ["{key}", " = ", "{value}"]
+        return ["{column_name}", " = ", "{value}"]
 
     @staticmethod
     def parameters() -> List[Parameter]:
         return [
-            ColumnNameParameter(name="key", label="column", example="Country"),
+            ColumnNameParameter(name="column_name", label="column", example="Country"),
             TextParameter(name="value", label="value", example="United States"),
         ]
 
     def serialize(self) -> List[str]:
-        return [self.type(), self.operation, self.key, self.value]
+        return [self.type(), self.operation, self.column_name, self.value]
 
     @classmethod
     def deserialize(cls, lst: List) -> ExactMatch:
         assert cls.type() == lst[0]
         return cls(
-            operation=lst[1], key=lst[2], value=lst[3],
+            operation=lst[1], column_name=lst[2], value=lst[3],
         )
-
-
-'''
-ExactMatchDef = ConstraintDef(
-    type=ExactMatch.type(),
-    description=["{key}", " = ", "{value}"],
-    parameters=[
-        TextParameter(name="key", label="column", example="Country"),
-        TextParameter(name="value", label="value", example="United States"),
-    ],
-)
-'''
 
 
 @register
 class MatchAny(FilterTransform):
-    def __init__(self, key: str, values: List[Value], operation: str):
-        self.key = key
+    def __init__(self, column_name: str, values: List[Value], operation: str):
+        self.column_name = column_name
         self.values = values
-        self._operation = operation
+        super().__init__(operation)
 
     @property
-    def operation(self) -> str:
-        return self._operation
+    def input_labels(self) -> Set[str]:
+        return {self.column_name}
 
     def filter(self, df: DataFrame, resources: TransformResource = None) -> bool:
-        return df[df[self.key].isin(self.values)]
+        return df[df[self.column_name].isin(self.values)]
 
     def __repr__(self) -> str:
-        return "{}:{}={}".format(self.type(), self.key, self.values)
+        return "{}:{}={}".format(self.type(), self.column_name, self.values)
 
     @staticmethod
     def type() -> str:
@@ -380,40 +450,40 @@ class MatchAny(FilterTransform):
 
     @staticmethod
     def description() -> List[str]:
-        return ["{key}", " in [", "{values}", "]"]
+        return ["{column_name}", " in [", "{values}", "]"]
 
     @staticmethod
     def parameters() -> List[Parameter]:
         return [
-            ColumnNameParameter(name="key", label="column", example="State"),
+            ColumnNameParameter(name="column_name", label="column", example="State"),
             TextListParameter(name="values", label="values", example="GA,ME,IL,WI"),
         ]
 
     def serialize(self) -> List[str]:
-        return [self.type(), self.operation, self.key, self.values]
+        return [self.type(), self.operation, self.column_name, self.values]
 
     @classmethod
     def deserialize(cls, lst: List) -> MatchAny:
         assert cls.type() == lst[0]
-        return cls(operation=lst[1], key=lst[2], values=lst[3])
+        return cls(operation=lst[1], column_name=lst[2], values=lst[3])
 
 
 @register
 class DoesNotMatch(FilterTransform):
-    def __init__(self, key: str, value: Value, operation: str):
-        self.key = key
+    def __init__(self, column_name: str, value: Value, operation: str):
+        self.column_name = column_name
         self.value = value
-        self._operation = operation
+        super().__init__(operation)
 
     @property
-    def operation(self) -> str:
-        return self._operation
+    def input_labels(self) -> Set[str]:
+        return {self.column_name}
 
     def filter(self, df: DataFrame, resources: TransformResource = None) -> bool:
-        return df[df[self.key].astype(str) != self.value]
+        return df[df[self.column_name].astype(str) != self.value]
 
     def __repr__(self) -> str:
-        return "{}:{}={}".format(self.type(), self.key, self.value)
+        return "{}:{}={}".format(self.type(), self.column_name, self.value)
 
     @staticmethod
     def type() -> str:
@@ -421,40 +491,40 @@ class DoesNotMatch(FilterTransform):
 
     @staticmethod
     def description() -> List[str]:
-        return ["{key}", " != ", "{value}"]
+        return ["{column_name}", " != ", "{value}"]
 
     @staticmethod
     def parameters() -> List[Parameter]:
         return [
-            ColumnNameParameter(name="key", label="column", example="Country"),
+            ColumnNameParameter(name="column_name", label="column", example="Country"),
             TextParameter(name="value", label="value", example="United States"),
         ]
 
     def serialize(self) -> List[str]:
-        return [self.type(), self.operation, self.key, self.value]
+        return [self.type(), self.operation, self.column_name, self.value]
 
     @classmethod
     def deserialize(cls, lst: List) -> DoesNotMatch:
         assert cls.type() == lst[0]
-        return cls(operation=lst[1], key=lst[2], value=lst[3])
+        return cls(operation=lst[1], column_name=lst[2], value=lst[3])
 
 
 @register
 class DoesNotMatchAny(FilterTransform):
-    def __init__(self, key: str, values: List[Value], operation: str):
-        self.key = key
+    def __init__(self, column_name: str, values: List[Value], operation: str):
+        self.column_name = column_name
         self.values = values
-        self._operation = operation
+        super().__init__(operation)
 
     @property
-    def operation(self) -> str:
-        return self._operation
+    def input_labels(self) -> Set[str]:
+        return {self.column_name}
 
     def filter(self, df: DataFrame, resources: TransformResource = None) -> bool:
-        return df[~df[self.key].isin(self.values)]
+        return df[~df[self.column_name].isin(self.values)]
 
     def __repr__(self) -> str:
-        return "{}:{}={}".format(self.type(), self.key, self.values)
+        return "{}:{}={}".format(self.type(), self.column_name, self.values)
 
     @staticmethod
     def type() -> str:
@@ -462,40 +532,40 @@ class DoesNotMatchAny(FilterTransform):
 
     @staticmethod
     def description() -> List[str]:
-        return ["{key}", " not in [", "{values}", "]"]
+        return ["{column_name}", " not in [", "{values}", "]"]
 
     @staticmethod
     def parameters() -> List[Parameter]:
         return [
-            ColumnNameParameter(name="key", label="column", example="State"),
+            ColumnNameParameter(name="column_name", label="column", example="State"),
             TextListParameter(name="values", label="values", example="GA,ME,IL,WI"),
         ]
 
     def serialize(self) -> List[str]:
-        return [self.type(), self.operation, self.key, self.values]
+        return [self.type(), self.operation, self.column_name, self.values]
 
     @classmethod
     def deserialize(cls, lst: List) -> DoesNotMatchAny:
         assert cls.type() == lst[0]
-        return cls(operation=lst[1], key=lst[2], values=lst[3])
+        return cls(operation=lst[1], column_name=lst[2], values=lst[3])
 
 
 @register
 class HasText(FilterTransform):
-    def __init__(self, key: str, value: str, operation: str):
-        self.key = key
+    def __init__(self, column_name: str, value: str, operation: str):
+        self.column_name = column_name
         self.value = str(value)
-        self._operation = operation
+        super().__init__(operation)
 
     @property
-    def operation(self) -> str:
-        return self._operation
+    def input_labels(self) -> Set[str]:
+        return {self.column_name}
 
     def filter(self, df: DataFrame, resources: TransformResource = None) -> bool:
-        return df[df[self.key].astype(str).str.lower().str.contains(self.value.lower())]
+        return df[df[self.column_name].astype(str).str.lower().str.contains(self.value.lower())]
 
     def __repr__(self) -> str:
-        return "{}:{}={}".format(self.type(), self.key, self.value)
+        return "{}:{}={}".format(self.type(), self.column_name, self.value)
 
     @staticmethod
     def type() -> str:
@@ -503,40 +573,40 @@ class HasText(FilterTransform):
 
     @staticmethod
     def description() -> List[str]:
-        return ["{key}", " contains ", "{value}"]
+        return ["{column_name}", " contains ", "{value}"]
 
     @staticmethod
     def parameters() -> List[Parameter]:
         return [
-            ColumnNameParameter(name="key", label="column", example="Comments"),
+            ColumnNameParameter(name="column_name", label="column", example="Comments"),
             TextParameter(name="value", label="value", example="help"),
         ]
 
     def serialize(self) -> List[str]:
-        return [self.type(), self.operation, self.key, self.value]
+        return [self.type(), self.operation, self.column_name, self.value]
 
     @classmethod
     def deserialize(cls, lst: List) -> HasText:
         assert cls.type() == lst[0]
-        return cls(operation=lst[1], key=lst[2], value=lst[3])
+        return cls(operation=lst[1], column_name=lst[2], value=lst[3])
 
 
 @register
 class DoesNotHaveText(FilterTransform):
-    def __init__(self, key: str, value: str, operation: str):
-        self.key = key
+    def __init__(self, column_name: str, value: str, operation: str):
+        self.column_name = column_name
         self.value = str(value)
-        self._operation = operation
+        super().__init__(operation)
 
     @property
-    def operation(self) -> str:
-        return self._operation
+    def input_labels(self) -> Set[str]:
+        return {self.column_name}
 
     def filter(self, df: DataFrame, resources: TransformResource = None) -> bool:
-        return df[~df[self.key].astype(str).str.lower().str.contains(self.value.lower())]
+        return df[~df[self.column_name].astype(str).str.lower().str.contains(self.value.lower())]
 
     def __repr__(self) -> str:
-        return "{}:{}={}".format(self.type(), self.key, self.value)
+        return "{}:{}={}".format(self.type(), self.column_name, self.value)
 
     @staticmethod
     def type() -> str:
@@ -544,55 +614,22 @@ class DoesNotHaveText(FilterTransform):
 
     @staticmethod
     def description() -> List[str]:
-        return ["{key}", " does not contain ", "{value}"]
+        return ["{column_name}", " does not contain ", "{value}"]
 
     @staticmethod
     def parameters() -> List[Parameter]:
         return [
-            ColumnNameParameter(name="key", label="column", example="email"),
+            ColumnNameParameter(name="column_name", label="column", example="email"),
             TextParameter(name="value", label="value", example=".gov"),
         ]
 
     def serialize(self) -> List[str]:
-        return [self.type(), self.operation, self.key, self.value]
+        return [self.type(), self.operation, self.column_name, self.value]
 
     @classmethod
     def deserialize(cls, lst: List) -> DoesNotHaveText:
         assert cls.type() == lst[0]
-        return cls(operation=lst[1], key=lst[2], value=lst[3])
-
-
-'''
-@register
-class Calculation(Constraint):
-    def __init__(self, expression):
-        self.expression = expression
-
-    def filter(self, df: DataFrame, resources: TransformResource = None) -> bool:
-        raise NotImplementedError
-
-    def __repr__(self) -> str:
-        return "{}:{}".format(self.type(), self.expression)
-
-    @staticmethod
-    def type() -> str:
-        return "Calculation"
-
-    @staticmethod
-    def description() -> List[str]:
-        return ["{key}", " does not contain ", "{value}"]
-
-    @staticmethod
-    def parameters() -> List[Parameter]:
-        return [
-            TextParameter(name="expression", label="expression", example="time1 + time2"),
-            TextParameter(name="equivalenceType", label="equivalenceType", example="="),
-            FloatParameter(name="value", label="value", example="10.5"),
-        ]
-'''
-
-TransformDef = ConstraintDef
-TransformList = ConstraintList
+        return cls(operation=lst[1], column_name=lst[2], value=lst[3])
 
 
 class EnrichmentResult:
@@ -611,68 +648,68 @@ class MergeColumnText(EnrichmentTransform):
 
     def __init__(
         self,
-        name: str,
+        new_column_label: str,
         column_labels: List[str],
         operation: str,
     ):
-        self.name = name
+        self.new_column_label = new_column_label
         self.column_labels = column_labels
-        self._operation = operation
-
-    @property
-    def operation(self) -> str:
-        return self._operation
+        super().__init__(operation)
 
     @staticmethod
     def type() -> str:
         return "MergeColumnText"
 
+    @property
+    def input_labels(self) -> Set[str]:
+        return set(self.column_labels)
+
+    @property
+    def output_labels(self) -> List[str]:
+        return [self.new_column_label]
+
     def enrich(self, df: DataFrame, resources: TransformResource = None) -> EnrichmentResult:
-        name = self.name
+        new_column_label = self.new_column_label
         column_labels = self.column_labels
 
         # choosing a character that will never occur in input
         null_sep = "\x01"
 
-        df[name] = df[column_labels[0]].astype(str).str.strip()
+        df[new_column_label] = df[column_labels[0]].astype(str).str.strip()
         for column_label in column_labels[1:]:
-            df[name] += null_sep + df[column_label].astype(str).str.strip()
+            df[new_column_label] += null_sep + df[column_label].astype(str).str.strip()
 
         all_sep = "^[{sep}]+$".format(sep=null_sep)
         start_sep = "^[{sep}]+".format(sep=null_sep)
         end_sep = "[{sep}]+$".format(sep=null_sep)
         repeated_sep = "[{sep}]+".format(sep=null_sep)
 
-        df[name] = df[name].str.replace(all_sep, "")
-        df[name] = df[name].str.replace(start_sep, "")
-        df[name] = df[name].str.replace(end_sep, "")
-        df[name] = df[name].str.replace(repeated_sep, SPACE)
+        df[new_column_label] = df[new_column_label].str.replace(all_sep, "")
+        df[new_column_label] = df[new_column_label].str.replace(start_sep, "")
+        df[new_column_label] = df[new_column_label].str.replace(end_sep, "")
+        df[new_column_label] = df[new_column_label].str.replace(repeated_sep, SPACE)
 
-        return EnrichmentResult(labels=[name])
-
-    @property
-    def labels(self) -> List[str]:
-        return [self.name]
+        return EnrichmentResult(labels=[new_column_label])
 
     def __repr__(self) -> str:
         return "{}:{}".format(self.type(), COMMA.join(self.column_labels))
 
     @staticmethod
     def description() -> List[str]:
-        return ["Merge(", "{column_labels}", ") as ", "{name}"]
+        return ["Merge(", "{column_labels}", ") as ", "{new_column_label}"]
 
     @staticmethod
     def parameters() -> List[Parameter]:
         return [
-            TextParameter(name="name", label="name", example="MyText"),
-            TextListParameter(name="column_labels", label="columns", example="Q1,Q4,Q7"),
+            TextParameter(name="new_column_label", label="name", example="MyText"),
+            ColumnNameListParameter(name="column_labels", label="columns", example="Q1,Q4,Q7"),
         ]
 
     def serialize(self) -> List:
         return [
             self.type(),
             self.operation,
-            self.name,
+            self.new_column_label,
             self.column_labels,
         ]
 
@@ -680,11 +717,11 @@ class MergeColumnText(EnrichmentTransform):
     def deserialize(cls, lst: List) -> MergeColumnText:
         assert cls.type() == lst[0]
         operation = lst[1]
-        name = lst[2]
+        new_column_label = lst[2]
         column_labels = lst[3]
 
         return cls(
-            name=name,
+            new_column_label=new_column_label,
             column_labels=column_labels,
             operation=operation,
         )
@@ -707,12 +744,12 @@ class ProblemReport(EnrichmentTransform):
     def __init__(
         self,
         operation: str,
-        text_column_labels: List[str],
+        text_column_label: str,
         rating_column_labels: List[str],
     ):
-        self.text_column_labels = text_column_labels
+        self.text_column_label = text_column_label
         self.rating_column_labels = rating_column_labels
-        self._operation = operation
+        super().__init__(operation)
 
         response_mapper = ResponseMapper()
         rating_map = response_mapper.get_maps(
@@ -726,14 +763,16 @@ class ProblemReport(EnrichmentTransform):
 
         self.detector = ProblemReportDetector(
             name=self.type(),
-            text_column_labels=self.text_column_labels,
+            text_column_label=self.text_column_label,
             rating_column_labels=self.rating_column_labels,
             rating_map=rating_map,
         )
 
     @property
-    def operation(self) -> str:
-        return self._operation
+    def input_labels(self) -> Set[str]:
+        deps = {self.text_column_label}
+        deps.update(self.rating_column_labels)
+        return deps
 
     def enrich(self, df: DataFrame, resources: TransformResource = None) -> EnrichmentResult:
         detector = self.detector
@@ -745,7 +784,7 @@ class ProblemReport(EnrichmentTransform):
         )
 
     @property
-    def labels(self) -> List[str]:
+    def output_labels(self) -> List[str]:
         return [self.detector.score_label, self.detector.text_label]
 
     @staticmethod
@@ -756,7 +795,7 @@ class ProblemReport(EnrichmentTransform):
     def description() -> List[str]:
         return [
             "problem reports in ",
-            "{text_column_labels}",
+            "{text_column_label}",
             " with ratings from ",
             "{rating_column_labels}",
         ]
@@ -764,10 +803,10 @@ class ProblemReport(EnrichmentTransform):
     @staticmethod
     def parameters() -> List[Parameter]:
         return [
-            TextListParameter(
-                name="text_column_labels",
-                label="text columns",
-                example="Written text",
+            ColumnNameParameter(
+                name="text_column_label",
+                label="text column",
+                example="Column containing written text",
             ),
             TextListParameter(
                 name="rating_column_labels",
@@ -777,214 +816,155 @@ class ProblemReport(EnrichmentTransform):
         ]
 
     def __repr__(self):
-        text_columns = ",".join(sorted(self.text_column_labels))
         rating_columns = ",".join(sorted(self.rating_column_labels))
-        return "{}:{}:{}".format(self.type(), text_columns, rating_columns)
+        return "{}:{}:{}".format(self.type(), self.text_column_label, rating_columns)
 
     def serialize(self) -> List[str]:
-        return [self.type(), self.operation, self.text_column_labels, self.rating_column_labels]
+        return [self.type(), self.operation, self.text_column_label, self.rating_column_labels]
 
     @classmethod
     def deserialize(cls, lst: List) -> ProblemReport:
         assert cls.type() == lst[0]
         return cls(
             operation=lst[1],
-            text_column_labels=lst[2],
+            text_column_label=lst[2],
             rating_column_labels=lst[3],
         )
 
-'''
+
 @register
 class Categorization(EnrichmentTransform):
-    sample_categories = {
-        "passports": [
-            "application",
-            "renewal",
-            "forms",
-            "process",
-            "visas",
-            "help",
-            "vacation",
-            "travel",
-            "wizard",
-            "expiration",
-            "post office",
-        ],
-        "corona": [
-            "stimulus",
-            "check",
-            "outbreak",
-            "local",
-            "concern",
-            "task force",
-            "closed",
-            "businesses",
-        ],
-        "voting": [
-            "elections",
-            "registration",
-            "officials",
-            "selective service",
-            "absentee",
-            "license",
-        ],
-        "jobs": [
-            "small business",
-            "fraud",
-            "scams",
-            "applications",
-            "unemployment",
-            "compensation",
-            "benefits",
-        ],
-        "money": [
-            "unclaimed",
-            "credit report",
-            "social security",
-            "fraud",
-            "scam",
-            "phish",
-        ],
-        "web": [
-            "site",
-            "link",
-            "page",
-            ".gov",
-            "survey",
-            "online",
-        ],
-        "license": [
-            "marriage",
-            "birth",
-            "replacement",
-            "birth certificate",
-            "social security card",
-            "replacement",
-        ],
-        "tax": [
-            "refund",
-            "direct deposit",
-            "state",
-            "website",
-            "federal tax refund",
-            "clear instruction",
-            "credit card",
-            "consumer action",
-            "low income",
-
-        ]
-    }
-
     LABEL_CATEGORY = "autocat1"
 
     def __init__(
         self,
-        name: str,
+        new_column_name: str,
+        text_column_name: str,
+        date_column_name: str,
+        pkey_column_name: str,
         operation: str,
-        column_label: str,
     ):
-        self.name = name
-        self.column_label = column_label
-        self._operation = operation
-
-    @property
-    def operation(self) -> str:
-        return self._operation
+        self.new_column_name = new_column_name
+        self.text_column_name = text_column_name
+        self.date_column_name = date_column_name
+        self.pkey_column_name = pkey_column_name
+        super().__init__(operation)
 
     @staticmethod
     def type() -> str:
         return "Autocat"
 
-    def enrich(self, df: DataFrame, resources: TransformResource = None) -> EnrichmentResult:
-        column_label = self.column_label
-
-        text = df[column_label]
-
-        name = self.name or self.LABEL_CATEGORY
-
-        df[name] = text.apply(self.count_words, args=(self.sample_categories,))
-
-        resources.dataset_id
-
-        return EnrichmentResult(labels=[self.LABEL_CATEGORY])
-
-    @classmethod
-    def count_words(cls, text: str, categories: Dict[str, List[str]]):
-        misc = "misc"
-        text = text.lower()
-
-        category_words = list(categories.keys())
-        category_counts = [
-            (text.count(word), word) for word in category_words
-        ]
-
-        best_pair = sorted(category_counts, reverse=True)[0]
-        if best_pair[0] == 0:
-            return "misc / misc"
-        else:
-            category = best_pair[1]
-
-        subcategory_words = categories[category]
-
-        subcategory_counts = [
-            (text.count(word), word) for word in subcategory_words
-        ]
-
-        best_pair = sorted(subcategory_counts, reverse=True)[0]
-        if best_pair[0] == 0:
-            subcategory = misc
-        else:
-            subcategory = best_pair[1]
-        return f"{category} / {subcategory}"
+    def input_labels(self) -> Set[str]:
+        return {self.text_column_name, self.date_column_name, self.pkey_column_name}
 
     @property
-    def labels(self) -> List[str]:
-        return [self.name]
+    def output_labels(self) -> List[str]:
+        return [self.new_column_name]
+
+    def enrich(self, df: DataFrame, resources: TransformResource = None) -> EnrichmentResult:
+        new_column_name = self.new_column_name
+        text_column_name = self.text_column_name
+        date_column_name = self.date_column_name
+        pkey_column_name = self.pkey_column_name
+
+        def f(series):
+            pairs = corpus_processor.categorize_text(
+                text=series[text_column_name],
+            )
+            return SPACE.join(f"{cat1}/{cat2}" for cat1, cat2 in pairs)
+
+        pkeys = list(df[self.pkey_column_name])
+
+        try:
+            entry_ids = autocat_handler.pkeys_to_entry_ids(pkeys)
+        except ValueError:
+            log.info("Loading corpus")
+            autocat_handler.load_corpus(
+                df=df,
+                pkey_column_name=pkey_column_name,
+                text_column_name=text_column_name,
+                date_column_name=date_column_name,
+            )
+
+            entry_ids = autocat_handler.pkeys_to_entry_ids(pkeys)
+
+        start = time()
+        log.info(f"building model...")
+        corpus_processor = autocat_handler.build_model(entry_ids)
+        log.info(f"building model completed in {time() - start:6.2f}")
+
+        log.info(f"applying...")
+        start = time()
+        df[new_column_name] = df.T.apply(f)
+        log.info(f"applying completed in {time() - start:6.2f}")
+
+        return EnrichmentResult(labels=[new_column_name])
 
     def __repr__(self) -> str:
-        return "{}:{}".format(self.type(), self.column_label)
+        return ":".join(
+            [
+                self.type(),
+                self.new_column_name,
+                self.text_column_name,
+                self.date_column_name,
+                self.pkey_column_name,
+            ]
+        )
 
     @staticmethod
     def description() -> List[str]:
-        return ["Autocat(", "{column_label}", ")"]
+        return ["Autocat1(", "{text_column_name}", ")"]
 
     @staticmethod
     def parameters() -> List[Parameter]:
         return [
-            ColumnNameParameter(name="column_label", label="column", example="Comments"),
+            TextParameter(name="new_column_name", label="new column name", example="autocat1"),
+            ColumnNameParameter(name="text_column_name", label="text", example="Text, Q3"),
+            ColumnNameParameter(name="date_column_name", label="date", example="StartDate"),
+            ColumnNameParameter(
+                name="pkey_column_label",
+                label="unique row identifier",
+                example="ResponseId",
+            ),
         ]
 
     def serialize(self) -> List:
-        return [self.type(), self.operation, self.column_label]
+        return [
+            self.type(),
+            self.operation,
+            self.new_column_name,
+            self.text_column_name,
+            self.date_column_name,
+            self.pkey_column_name,
+        ]
 
     @classmethod
     def deserialize(cls, lst: List) -> Categorization:
         assert cls.type() == lst[0]
         operation = lst[1]
-        column_label = lst[2]
-
-        try:
-            name = lst[3]
-        except IndexError:
-            name = cls.LABEL_CATEGORY
+        new_column_name = lst[2]
+        text_column_name = lst[3]
+        date_column_name = lst[4]
+        pkey_column_name = lst[5]
 
         return cls(
-            column_label=column_label,
+            new_column_name=new_column_name,
+            text_column_name=text_column_name,
+            date_column_name=date_column_name,
+            pkey_column_name=pkey_column_name,
             operation=operation,
-            name=name,
         )
-'''
 
 
 @register
 class HasTag(FilterTransform):
     def __init__(self, tag: str, operation: str):
         self.tag = str(tag)
-        self._operation = operation
+        super().__init__(operation)
 
     @property
-    def operation(self) -> str:
-        return self._operation
+    def input_labels(self) -> Set[str]:
+        return {Tag.TAG_COLUMN_LABEL}
 
     def filter(self, df: DataFrame, resources: TransformResource = None) -> bool:
         tags_by_key = resources.tag.get_tags_by_key
@@ -1028,19 +1008,19 @@ class Tag(EnrichmentTransform):
 
     def __init__(
         self,
-        operation: str,
         primary_key_column_label: str,
+        operation: str,
     ):
-        self._operation = operation
         self.primary_key_column_label = primary_key_column_label
+        super().__init__(operation)
+
+    @property
+    def input_labels(self) -> Set[str]:
+        return {self.primary_key_column_label}
 
     @staticmethod
     def type() -> str:
         return "Tag"
-
-    @property
-    def operation(self) -> str:
-        return self._operation
 
     def enrich(self, df: DataFrame, resources: TransformResource = None) -> EnrichmentResult:
         primary_key_column_label = self.primary_key_column_label
@@ -1054,7 +1034,7 @@ class Tag(EnrichmentTransform):
         return EnrichmentResult(labels=[self.TAG_COLUMN_LABEL])
 
     @property
-    def labels(self) -> List[str]:
+    def output_labels(self) -> List[str]:
         return [self.TAG_COLUMN_LABEL]
 
     @staticmethod
@@ -1100,28 +1080,31 @@ class ExtractNth(EnrichmentTransform):
         self,
         position: int,
         separator: str,
-        name: str,
+        new_column_label: str,
         column_label: str,
         operation: str,
     ):
         self.position = position
         self.separator = separator
-        self.name = name
+        self.new_column_label = new_column_label
         self.column_label = column_label
-        self._operation = operation
+        super().__init__(operation)
 
     @property
-    def operation(self) -> str:
-        return self._operation
+    def input_labels(self) -> Set[str]:
+        return {self.column_label}
 
     @staticmethod
     def type() -> str:
         return "ExtractNth"
 
     def enrich(self, df: DataFrame, resources: TransformResource = None) -> EnrichmentResult:
-        name = self.name
+        new_column_label = self.new_column_label
         column_label = self.column_label
-        index = self.position - 1
+        if self.position == -1:
+            index = -1
+        else:
+            index = self.position - 1
         separator = self.separator
 
         '''
@@ -1131,7 +1114,7 @@ class ExtractNth(EnrichmentTransform):
             except IndexError:
                 return ""
 
-        df[name] = df[column_label].apply(extract_nth)
+        df[new_column_label] = df[column_label].apply(extract_nth)
         '''
 
         def extract_nth(series):
@@ -1141,56 +1124,232 @@ class ExtractNth(EnrichmentTransform):
             except IndexError:
                 return ""
 
-        df[name] = df.T.apply(extract_nth)
+        df[new_column_label] = df.T.apply(extract_nth)
 
-        return EnrichmentResult(labels=[name])
+        return EnrichmentResult(labels=[new_column_label])
 
     @property
-    def labels(self) -> List[str]:
-        return [self.name]
+    def output_labels(self) -> List[str]:
+        return [self.new_column_label]
 
     def __repr__(self) -> str:
-        return f"{self.type()}:{self.position}:{self.separator}:{self.column_label}:{self.name}"
+        return ":".join(
+            [
+                self.type(),
+                str(self.position),
+                self.separator,
+                self.column_label,
+                self.new_column_label
+            ]
+        )
 
     @staticmethod
     def description() -> List[str]:
-        return ["Extract instance ", "{pos}", " from ", "{column_label}"]
+        return ["Extract ", "{pos}", " from ", "{column_label}"]
 
     @staticmethod
     def parameters() -> List[Parameter]:
         return [
+            ColumnNameParameter(name="column_label", label="column", example="History"),
             IntegerParameter(
                 name="position", label="position", example='"1" to indicate the first instance',
             ),
             TextParameter(name="separator", label="separator", example=","),
-            TextParameter(name="name", label="name", example="FirstUrl"),
-            ColumnNameParameter(name="column_label", label="column", example="History"),
+            TextParameter(name="new_column_label", label="new column name", example="FirstUrl"),
         ]
 
     def serialize(self) -> List:
         return [
             self.type(),
             self.operation,
+            self.column_label,
             self.position,
             self.separator,
-            self.column_label,
-            self.name,
+            self.new_column_label,
         ]
 
     @classmethod
     def deserialize(cls, lst: List) -> ExtractNth:
         assert cls.type() == lst[0]
         operation = lst[1]
-        position = int(lst[2])
-        separator = str(lst[3])
-        name = str(lst[4])
-        column_label = str(lst[5])
+        column_label = str(lst[2])
+        position = int(lst[3])
+        separator = str(lst[4])
+        new_column_label = str(lst[5])
 
         return cls(
             position=position,
             separator=separator,
-            name=name,
+            new_column_label=new_column_label,
             column_label=column_label,
+            operation=operation,
+        )
+
+
+@register
+class DateRange(FilterTransform):
+    DATE_SEPARATOR = ":"
+
+    def __init__(self, column_name: str, date_string: str, operation: str):
+        self.column_name = column_name
+        self.date_string = date_string
+        super().__init__(operation)
+
+    @classmethod
+    def type(cls) -> str:
+        return "DateRange"
+
+    def filter(self, df: DataFrame, resources: TransformResource = None) -> bool:
+        column_name = self.column_name
+        start_string, end_string = self.date_string.split(self.DATE_SEPARATOR)
+        start_dt = datetime.fromisoformat(start_string)
+        end_dt = datetime.fromisoformat(end_string)
+        return df[(df[column_name] >= start_dt) & (df[column_name] <= end_dt)]
+
+    @property
+    def input_labels(self) -> Set[str]:
+        return {self.column_name}
+
+    @staticmethod
+    def description() -> List[str]:
+        return ["DateRange ", "{date_string}"]
+
+    @staticmethod
+    def parameters() -> List[Parameter]:
+        return [
+            ColumnNameParameter(name="column_name", label="date_column", example="StartDate"),
+            DateRangeParameter(name="date_string", label="date range", example=""),
+        ]
+
+    def __repr__(self) -> str:
+        return f"{self.type()}:{self.column_name}:{self.date_string}"
+
+    def serialize(self) -> List:
+        return [
+            self.type(),
+            self.operation,
+            self.column_name,
+            self.date_string,
+        ]
+
+    @classmethod
+    def deserialize(cls, lst: List) -> DateRange:
+        assert cls.type() == lst[0]
+        operation = lst[1]
+        column_name = str(lst[2])
+        date_string = str(lst[3])
+
+        return cls(
+            date_string=date_string,
+            column_name=column_name,
+            operation=operation,
+        )
+
+
+@register
+class DateRanges(EnrichmentTransform):
+    DATE_SEPARATOR = ":"
+
+    def __init__(
+        self,
+        date_column_name: str,
+        date_strings: List[str],
+        new_column_name: str,
+        operation: str,
+    ):
+        self.date_column_name = date_column_name
+        self.date_strings = date_strings
+        self.new_column_name = new_column_name
+        super().__init__(operation)
+
+        self._date_ranges = self._init_date_ranges(date_strings)
+
+    @classmethod
+    def type(cls) -> str:
+        return "DateRanges"
+
+    @classmethod
+    def _init_date_ranges(cls, date_strings: List[str]) -> List[Tuple[datetime, datetime]]:
+        date_strings = deque(date_strings)
+
+        date_ranges = []
+        for date_string in date_strings:
+            start_date_string, end_date_string = date_string.split(cls.DATE_SEPARATOR)
+            start_dt = datetime.fromisoformat(start_date_string)
+            end_dt = datetime.fromisoformat(end_date_string)
+            date_ranges.append((start_dt, end_dt))
+
+        return date_ranges
+
+    def enrich(self, df: DataFrame, resources: TransformResource = None) -> EnrichmentResult:
+        date_column_name = self.date_column_name
+        date_ranges = self._date_ranges
+        new_column_name = self.new_column_name
+
+        def f(series):
+            target = series[date_column_name]
+            for i, (start, end) in enumerate(date_ranges):
+                if start <= target < end:
+                    return i + 1
+            return ""
+
+        df[new_column_name] = df.T.apply(f)
+        return EnrichmentResult(labels=[new_column_name])
+
+    @property
+    def input_labels(self) -> Set[str]:
+        return {self.date_column_name}
+
+    @property
+    def output_labels(self) -> List[str]:
+        return [self.new_column_name]
+
+    @staticmethod
+    def description() -> List[str]:
+        return [
+            "DateRanges ", "{date_strings}", " via ",
+            "{date_column_name}", " as ", "{new_column_name}",
+        ]
+
+    @staticmethod
+    def parameters() -> List[Parameter]:
+        return [
+            ColumnNameParameter(name="date_column_name", label="date column", example="StartDate"),
+            TextParameter(name="new_column_name", label="new column name", example="DateRanges"),
+            DateRangeListParameter(name="date_strings", label="date ranges", example=""),
+        ]
+
+    def __repr__(self) -> str:
+        return ":".join(
+            [
+                self.type(),
+                self.date_column_name,
+                self.new_column_name,
+                self.DATE_SEPARATOR.join(self.date_strings),
+            ]
+        )
+
+    def serialize(self) -> List:
+        return [
+            self.type(),
+            self.operation,
+            self.date_column_name,
+            self.new_column_name,
+            self.date_strings,
+        ]
+
+    @classmethod
+    def deserialize(cls, lst: List) -> DateRanges:
+        assert cls.type() == lst[0]
+        operation = lst[1]
+        date_column_name = str(lst[2])
+        new_column_name = str(lst[3])
+        date_strings = lst[4]
+
+        return cls(
+            date_column_name=date_column_name,
+            new_column_name=new_column_name,
+            date_strings=date_strings,
             operation=operation,
         )
 
@@ -1207,21 +1366,21 @@ class MatchingColumns(FilterTransform):
     ):
         self.column_label_i = column_label_i
         self.column_label_j = column_label_j
-        self._operation = operation
+        super().__init__(operation)
 
     @property
-    def operation(self) -> str:
-        return self._operation
+    def input_labels(self) -> Set[str]:
+        return {self.column_label_i, self.column_label_j}
 
     @staticmethod
     def type() -> str:
         return "MatchingColumns"
 
-    def filter(self, df: DataFrame, resources: TransformResource = None) -> EnrichmentResult:
+    def filter(self, df: DataFrame, resources: TransformResource = None) -> bool:
         return df[df[self.column_label_i] == df[self.column_label_j]]
 
     @property
-    def labels(self) -> List[str]:
+    def output_labels(self) -> List[str]:
         return [self.name]
 
     def __repr__(self) -> str:

@@ -1,61 +1,61 @@
 
 class TransformManager {
   constructor(
-    buildConstraintWindowId,
+    buildTransformWindowId,
     buildVisualizationWindowId,
-    addConstraintWindowId,
+    addTransformWindowId,
     addFilterButtonId,
     addEnrichmentButtonId,
     addVisualizationButtonId,
-    constraintListWindowId,
-    constraintListTableId,
+    transformListWindowId,
+    transformListTableId,
   ) {
-    this.buildConstraintWindowId = buildConstraintWindowId;
+    this.buildTransformWindowId = buildTransformWindowId;
     this.buildVisualizationWindowId = buildVisualizationWindowId;
-    this.addConstraintWindowId = addConstraintWindowId;
+    this.addTransformWindowId = addTransformWindowId;
     this.addFilterButtonId = addFilterButtonId;
     this.addEnrichmentButtonId = addEnrichmentButtonId;
     this.addVisualizationButtonId = addVisualizationButtonId;
-    this.constraintListWindowId = constraintListWindowId;
-    this.constraintListTableId = constraintListTableId;
+    this.transformListWindowId = transformListWindowId;
+    this.transformListTableId = transformListTableId;
 
-    this.buildConstraintWindow = null;
+    this.buildTransformWindow = null;
     this.buildVisualizationWindow = null;
     this.addWindow = null;
     this.addFilterButton = null;
     this.addEnrichmentButton = null;
     this.addVisualizationButton = null;
-    this.constraintListWindow = null;
+    this.transformListWindow = null;
 
-    this._constraintDefs = [];
-    this._constraintDefByType = {};
+    this._transformDefs = [];
+    this._transformDefByType = {};
   }
 
   init() {
     console.group('TransformManager.init');
     const initElements = () => {
-      this.buildConstraintWindow = document.getElementById(this.buildConstraintWindowId);
+      this.buildTransformWindow = document.getElementById(this.buildTransformWindowId);
       this.buildVisualizationWindow = document.getElementById(this.buildVisualizationWindowId);
-      this.addWindow = document.getElementById(this.addConstraintWindowId);
+      this.addWindow = document.getElementById(this.addTransformWindowId);
       this.addFilterButton = document.getElementById(this.addFilterButtonId);
       this.addEnrichmentButton = document.getElementById(this.addEnrichmentButtonId);
       this.addVisualizationButton = document.getElementById(this.addVisualizationButtonId);
-      this.constraintListWindow = document.getElementById(this.constraintListWindowId);
+      this.transformListWindow = document.getElementById(this.transformListWindowId);
     };
 
     const initEventHandler = () => {
       this.addFilterButton.onmousedown = e => ifPrimaryClick(e, () => {
         console.info('addFilterButton mousedown', e);
         this.hideAddWindow();
-        this.createNewBuildWindow(ConstraintType.FILTER);
-        show(this.buildConstraintWindow);
+        this.createNewBuildWindow(TransformType.FILTER);
+        show(this.buildTransformWindow);
       });
 
       this.addEnrichmentButton.onmousedown = e => ifPrimaryClick(e, () => {
         console.info('addEnrichmentButton mousedown', e);
         this.hideAddWindow();
-        this.createNewBuildWindow(ConstraintType.ENRICHMENT);
-        show(this.buildConstraintWindow);
+        this.createNewBuildWindow(TransformType.ENRICHMENT);
+        show(this.buildTransformWindow);
       });
 
       this.addVisualizationButton.onmousedown = e => ifPrimaryClick(e, () => {
@@ -70,28 +70,28 @@ class TransformManager {
     return Promise.all([
       initElements(),
       initEventHandler(),
-      this.fetchConstraintDefs(),
+      this.fetchTransformDefs(),
     ]);
   }
 
-  createNewBuildWindow(constraintType) {
-    emptyElement(this.buildConstraintWindow);
-    this.addConstraintNameSpecification(this.buildConstraintWindow, constraintType);
+  createNewBuildWindow(transformType) {
+    emptyElement(this.buildTransformWindow);
+    this.addTransformNameSpecification(this.buildTransformWindow, transformType);
   }
 
-  get constraintDefs() {
-    return this._constraintDefs;
+  get transformDefs() {
+    return this._transformDefs;
   }
 
-  set constraintDefs(constraintDefs) {
-    this._constraintDefs = constraintDefs;
-    for (const constraintDef of this._constraintDefs) {
-      this._constraintDefByType[constraintDef.type] = constraintDef;
+  set transformDefs(transformDefs) {
+    this._transformDefs = transformDefs;
+    for (const transformDef of this._transformDefs) {
+      this._transformDefByType[transformDef.type] = transformDef;
     }
   }
 
-  async fetchConstraintDefs() {
-    const url = HOST + services.getConstraintDefs;
+  async fetchTransformDefs() {
+    const url = HOST + services.getTransformDefs;
 
     const response = await fetch(url);
     if (response.status !== HTTP_OK) {
@@ -101,8 +101,7 @@ class TransformManager {
 
     try {
       const result = await response.json();
-      console.log('constraintDefs: ', result, 'this', this);
-      this.constraintDefs = result.map(def => ConstraintDef.fromDict(def));
+      this.transformDefs = result.map(def => TransformDef.fromDict(def));
     } catch(err) {
       console.log('Fetch Error:', err);
     }
@@ -116,24 +115,24 @@ class TransformManager {
     show(this.addWindow);
   }
 
-  get constraintDefTypes() {
-    return this.constraintDefs.map(constraint => constraint.type);
+  get transformDefTypes() {
+    return this.transformDefs.map(transform => transform.type);
   }
 
-  constraintDefByType(constraintType) {
-    console.info('constraintDefByType', Object.keys(this._constraintDefByType));
-    return this._constraintDefByType[constraintType];
+  transformDefByType(transformType) {
+    return this._transformDefByType[transformType];
   }
 
-  addConstraintNameSpecification(parentElement, constraintType) {
-    console.info(constraintType);
-    const parameterSpecificationContainerId = 'constraintArgumentSpecificationContainer';
-    const constraintNameContainer = createDiv({id: 'constraintNameContainer'});
+  addTransformNameSpecification(parentElement, transformType) {
+    console.info(transformType);
+    const parameterSpecificationContainerId = 'transformArgumentSpecificationContainer';
+    const transformNameContainer = createDiv({id: 'transformNameContainer'});
 
-    const constraintNames = this.constraintDefTypes;
-    const constraintNameSet = new Set(constraintNames);
+    const transformNames = this.transformDefTypes;
+    const transformNameSet = new Set(transformNames);
 
-    const addConstraintArguments = e => {
+    const addTransformArguments = e => {
+      console.info("XXXXX addTransformArguments");
       const currentValue = e.currentTarget.value;
       console.info('current value', currentValue);
 
@@ -149,108 +148,96 @@ class TransformManager {
 
       emptyElement(parameterSpecificationContainer);
 
-      if (constraintNameSet.has(currentValue)) {
-        this.addArgumentsToBuildWindow(currentValue, parameterSpecificationContainer, constraintType);
+      if (transformNameSet.has(currentValue)) {
+        this.addArgumentsToBuildWindow(currentValue, parameterSpecificationContainer, transformType);
       }
     };
 
-    const constraintTypeInput = createInput({
-      id: 'constraintTypeInput',
+    const transformTypeInput = createInput({
+      id: 'transformTypeInput',
       type: 'text',
-      name: 'constraintType',
-      list: 'constraintTypes',
-      change: addConstraintArguments,
+      name: 'transformType',
+      list: 'transformTypes',
+      change: addTransformArguments,
     });
 
-    const datalist = createDataList({id: 'constraintTypes'});
-    for (const constraintName of constraintNames) {
-      const constraintDef = this.constraintDefByType(constraintName);
-      if (constraintDef.operations.indexOf(constraintType) === -1) {
+    const datalist = createDataList({id: 'transformTypes'});
+    for (const transformName of transformNames) {
+      const transformDef = this.transformDefByType(transformName);
+      if (transformDef.operations.indexOf(transformType) === -1) {
         continue;
       }
 
-      datalist.appendChild(createOption({value: constraintName}));
+      datalist.appendChild(createOption({value: transformName}));
     }
 
     const closeButton = createButton({
-      id: 'closeAddConstraintButton',
+      id: 'closeAddTransformButton',
       html: '&times;',
       mousedown: () => {
-        hide(this.buildConstraintWindow);
+        hide(this.buildTransformWindow);
         this.showAddWindow();
       },
     });
 
-    parentElement.appendChild(constraintNameContainer);
-    constraintNameContainer.appendChild(closeButton);
-    constraintNameContainer.appendChild(constraintTypeInput);
-    constraintNameContainer.appendChild(datalist);
+    parentElement.appendChild(transformNameContainer);
+    transformNameContainer.appendChild(closeButton);
+    transformNameContainer.appendChild(transformTypeInput);
+    transformNameContainer.appendChild(datalist);
   }
 
 
-  addArgumentsToBuildWindow(constraintName, parentElement, constraintType) {
-    const exampleClass = 'constraintArgumentExample';
-    const labelClass = 'constraintArgumentLabel';
-    const parametersTableClassName = 'constraintArgumentTable';
-    const parameterDefs = this.constraintDefByType(constraintName).parameters;
+  addArgumentsToBuildWindow(transformName, parentElement, transformType) {
+    const exampleClass = 'transformArgumentExample';
+    const labelClass = 'transformArgumentLabel';
+    const parametersTableClassName = 'transformArgumentTable';
+    const parameterDefs = this.transformDefByType(transformName).parameters;
+
+    const argumentBuilder = new ArgumentBuilder();
 
     const parametersTable = createTable({cls: parametersTableClassName});
     for (const parameterDef of parameterDefs) {
 
-      console.info("parameterDef.type", parameterDef.type);
+      console.info(transformType, transformName, "parameterDef.type", parameterDef.type);
 
-      const labelId = 'parameterInput__' + parameterDef.label;
-      const datalistId = 'parameterDatalist__' + parameterDef.label;
+      const labelId = ArgumentBuilder.inputIdFromDef(parameterDef);
 
-      const elements = [];
-      if (parameterDef.type === ParameterDef.TYPE_COLUMN_NAME) {
-        const container = createSpan({});
-
-        const columnNames = createDataList({id: datalistId});
-        for (const label of app.dataView.labels) {
-          columnNames.appendChild(createOption({value: label.name}));
-        }
-        container.appendChild(columnNames);
-
-        container.appendChild(createInput({
-          id: labelId,
-          type: 'text',
-          list: datalistId,
-          keydown: e => ifEnterPressed(e, () => this.completeTransform(constraintName, constraintType)),
-        }));
-
-        elements.push(container);
-      } else {
-        elements.push(createInput({
-          id: labelId,
-          type: 'text',
-          keydown: e => ifEnterPressed(e, () => this.completeTransform(constraintName, constraintType)),
-        }));
-
-      }
-
-      elements.push(createLabel({cls: labelClass, text: parameterDef.label}));
-
-      if (parameterDef.example) {
-        elements.push(createLabel({
-          cls: exampleClass, text: parameterDef.example,
-        }));
-      }
+      const onkeydown = e => ifEnterPressed(e, () => this.completeTransform(transformName, transformType));
 
       const row = parametersTable.insertRow();
-      for (const elem of elements) {
-        elem && row.insertCell().appendChild(elem)
+      const inputCell = row.insertCell();
+
+      if (parameterDef.type === ParameterDef.TYPE_COLUMN_NAME) {
+        argumentBuilder.buildColumnNameInput(labelId, parameterDef, onkeydown, inputCell);
+      } else if (parameterDef.type === ParameterDef.TYPE_DATE_RANGE) {
+        argumentBuilder.buildDateRangeInput(labelId, parameterDef, onkeydown, inputCell);
+      } else if (parameterDef.type === ParameterDef.TYPE_DATE_RANGE_LIST) {
+        argumentBuilder.buildDateRangeInputList(labelId, parameterDef, onkeydown, inputCell);
+      } else if (parameterDef.type === ParameterDef.TYPE_COLUMN_NAME_LIST) {
+        argumentBuilder.buildColumnNameInputList(labelId, parameterDef, onkeydown, inputCell);
+      } else {
+        argumentBuilder.buildTextInput(labelId, parameterDef, onkeydown, inputCell);
+      }
+
+      row.insertCell().appendChild(createLabel({
+        cls: labelClass, text: parameterDef.label
+      }));
+
+      if (parameterDef.example) {
+        row.insertCell().appendChild(createLabel({
+          cls: exampleClass, text: parameterDef.example,
+        }));
       }
     }
 
     parentElement.appendChild(parametersTable);
   }
 
-  async completeTransform(constraintName, constraintType) {
-    const buildWindow = document.getElementById('buildConstraintWindow');
-    const addWindow = document.getElementById('addConstraintWindow');
-    const constraintTypeInput = document.getElementById('constraintTypeInput');
-    const parameterDefs = this.constraintDefByType(constraintName).parameters;
+  async completeTransform(transformName, transformType) {
+    const buildWindow = document.getElementById('buildTransformWindow');
+    const addWindow = document.getElementById('addTransformWindow');
+    const transformTypeInput = document.getElementById('transformTypeInput');
+    const parameterDefs = this.transformDefByType(transformName).parameters;
 
     function validate() {
       console.warn('Validation not implemented');
@@ -261,15 +248,70 @@ class TransformManager {
       const parameters = {};
 
       for (const parameterDef of parameterDefs) {
-        const inputId = 'parameterInput__' + parameterDef.label;
-        parameters[parameterDef.name] = document.getElementById(inputId).value;
-      }
-      console.info('save', constraintTypeInput.value, parameters);
-      const constraintDefType = constraintTypeInput.value;
-      const constraintDef = this.constraintDefByType(constraintDefType);
-      const constraint = new Constraint(constraintDef, parameters, constraintType);
+        const inputId = ArgumentBuilder.inputIdFromDef(parameterDef);
+        const indexId = ArgumentBuilder.indexIdFromLabelId(inputId);
 
-      await this.transformDataView({dataView: app.dataView, addTransforms: [constraint]});
+        if (ParameterDef.COLLECTION_TYPES.has(parameterDef.type)) {
+          const indexElement = document.getElementById(indexId);
+          const numEntries = indexElement ? parseInt(indexElement.value) : 0;
+          console.info("numEntries", numEntries);
+          const entries = [];
+          for (const i of Array(numEntries).keys()) {
+            const index = i + 1;
+            const indexedInputId = inputId + '_' + index;
+
+            console.info(">>>", inputId, indexedInputId, i, index, numEntries);
+
+            entries.push(document.getElementById(indexedInputId).value);
+          }
+
+          console.info("!!!", numEntries, "!!!", entries);
+
+          if (parameterDef.type === ParameterDef.TYPE_DATE_RANGE_LIST) {
+
+            const numPairs = (entries.length / 2) >> 0;
+
+            console.info("NUMPAIRS", numPairs);
+
+            const dateRanges = [];
+            for (const i of Array(numPairs).keys()) {
+              const dateRange = [entries[2 * i], entries[2 * i + 1]];
+              dateRanges.push(dateRange.join(ParameterDef.DATE_RANGE_SEPARATOR));
+            }
+
+            console.info("@", dateRanges);
+
+            parameters[parameterDef.name] = dateRanges.join(ParameterDef.LIST_SEPARATOR);
+
+          } else {
+            parameters[parameterDef.name] = entries.join(ParameterDef.LIST_SEPARATOR);
+          }
+
+        } else {
+          if (parameterDef.type === ParameterDef.TYPE_DATE_RANGE) {
+            const prefixes = ['from', 'to'];
+            const dateStrings = [];
+            for (const prefix of prefixes) {
+              const prefixedInputId = prefix + '_' + inputId;
+              const dateString = document.getElementById(prefixedInputId).value;
+              dateStrings.push(dateString);
+            }
+
+            parameters[parameterDef.name] = dateStrings.join(ParameterDef.DATE_RANGE_SEPARATOR);
+
+          } else {
+            console.info("###", parameterDef.name, inputId);
+            parameters[parameterDef.name] = document.getElementById(inputId).value;
+          }
+        }
+      }
+
+      console.info('save', transformTypeInput.value, parameters);
+      const transformDefType = transformTypeInput.value;
+      const transformDef = this.transformDefByType(transformDefType);
+      const transform = new Transform(transformDef, parameters, transformType);
+
+      await this.transformDataView({dataView: app.dataView, addTransforms: [transform]});
       hide(buildWindow);
 
       emptyElement(buildWindow);
@@ -280,46 +322,46 @@ class TransformManager {
     }
   }
 
-  async updateConstraintList() {
-    emptyElement(this.constraintListWindow);
+  async updateTransformList() {
+    emptyElement(this.transformListWindow);
 
-    const constraintTable = createDiv({
-      id: this.constraintListTableId,
+    const transformTable = createDiv({
+      id: this.transformListTableId,
     });
 
     let i = 0;
-    for (const constraint of app.dataView.transforms) {
-      const baseId = 'constraint' + i;
+    for (const transform of app.dataView.transforms) {
+      const baseId = 'transform' + i;
 
       const entry = createDiv({
-        cls: 'constraintEntry',
+        cls: 'transformEntry',
         style: { 'display': 'inline-flex' },
       });
 
       const button = createButton({
         id: baseId + 'RemoveButton',
-        cls: 'removeConstraintButton',
+        cls: 'removeTransformButton',
         html: '&times;',
         mousedown: e => ifPrimaryClick(e, () => {
-          console.info('removing constraint', i, constraint);
-          return this.transformDataView({dataView: app.dataView, deleteTransforms: [constraint]});
+          console.info('removing transform', i, transform);
+          return this.transformDataView({dataView: app.dataView, deleteTransforms: [transform]});
         }),
       });
 
-      const constraintType = createDiv({
+      const transformType = createDiv({
         id: baseId + 'Type',
-        cls: 'constraintListType',
+        cls: 'transformListType',
       });
 
-      constraintType.appendChild(constraint.richTextDescription);
+      transformType.appendChild(transform.richTextDescription);
       entry.appendChild(button);
-      entry.appendChild(constraintType);
-      constraintTable.appendChild(entry);
+      entry.appendChild(transformType);
+      transformTable.appendChild(entry);
 
       i += 1;
     }
 
-    this.constraintListWindow.appendChild(constraintTable);
+    this.transformListWindow.appendChild(transformTable);
   }
 
 
@@ -422,8 +464,8 @@ class TransformManager {
   }
 
   addArgumentsToVisualizationWindow(chartType, parentElement) {
-    const parametersTableClassName = 'constraintArgumentTable';
-    const labelClassName = 'constraintArgumentLabel';
+    const parametersTableClassName = 'transformArgumentTable';
+    const labelClassName = 'transformArgumentLabel';
 
     const parametersTable = createTable({cls: parametersTableClassName });
     const row = parametersTable.insertRow();
@@ -459,5 +501,228 @@ class TransformManager {
     );
 
     parentElement.appendChild(parametersTable);
+  }
+}
+
+
+class ArgumentBuilder {
+  static inputIdFromDef(parameterDef) {
+    return 'parameterInput__' + parameterDef.name;
+  }
+
+  static indexIdFromLabelId(labelId) {
+    return 'index_' + labelId;
+  }
+
+  buildColumnNameInput(labelId, parameterDef, onkeydown, parentElement) {
+    console.info('buildColumnNameInput');
+    const container = createSpan({});
+    const inputId = ArgumentBuilder.inputIdFromDef(parameterDef);
+
+    const columnNames = createSelect({
+      id: inputId,
+      keydown: onkeydown,
+    });
+
+    for (const label of app.dataView.labels) {
+      columnNames.appendChild(createOption({
+        value: label.name,
+        text: label.name,
+        keydown: onkeydown,
+      }));
+    }
+    container.appendChild(columnNames);
+    parentElement.appendChild(container);
+  }
+
+  buildDateRangeInput(labelId, parameterDef, onkeydown, parentElement) {
+    const container = createSpan({});
+
+    container.appendChild(createInput({
+      id: 'from_' + labelId,
+      type: 'date',
+      keydown: onkeydown,
+    }));
+
+    container.appendChild(createInput({
+      id: 'to_' + labelId,
+      type: 'date',
+      keydown: onkeydown,
+    }));
+
+    parentElement.appendChild(container);
+  }
+
+  buildDateRangeInputList(labelId, parameterDef, onkeydown, parentElement) {
+    const indexId = ArgumentBuilder.indexIdFromLabelId(labelId);
+    const initialIndex = 2;
+    const indexDelta = 2;
+
+    function getOrCreateIndex(indexId) {
+      if (document.getElementById(indexId)) {
+        return document.getElementById(indexId);
+      } else {
+        const indexElement = createInput({
+          id: indexId,
+          value: initialIndex,
+          style: {
+            display: 'none',
+          },
+        });
+        parentElement.appendChild(indexElement);
+        return indexElement;
+      }
+    }
+
+    const indexElement = getOrCreateIndex(indexId, parentElement);
+
+    const index = parseInt(indexElement.value);
+    console.info("INFO", index, indexElement.value);
+
+    const container = createDiv({});
+
+    container.appendChild(createDiv({
+      id: ArgumentBuilder.indexIdFromLabelId(labelId)
+    }));
+
+    container.appendChild(createInput({
+      id: labelId + '_' + (index - 1),
+      type: 'date',
+      keydown: onkeydown,
+    }));
+
+    container.appendChild(createInput({
+      id: labelId + '_' + index,
+      type: 'date',
+      keydown: onkeydown,
+    }));
+
+    container.appendChild(createButton({
+      cls: 'transformAddArgumentButton',
+      text: '+',
+      mousedown: e => ifPrimaryClick(e, () => {
+        const indexElement = getOrCreateIndex(indexId, parentElement);
+        indexElement.value = parseInt(indexElement.value) + indexDelta;
+        this.buildDateRangeInputList(
+          labelId, parameterDef, onkeydown, parentElement
+        );
+      })
+    }));
+
+    container.appendChild(createButton({
+      cls: 'transformAddArgumentButton',
+      text: '-',
+      mousedown: e => ifPrimaryClick(e, () => {
+        const indexElement = getOrCreateIndex(indexId, parentElement);
+        const index = indexElement ? parseInt(indexElement.value) : 0;
+        if (index / indexDelta > 1) {
+          indexElement.value = index - indexDelta;
+          container.parentElement.removeChild(container);
+        }
+      })
+    }));
+
+    parentElement.appendChild(container);
+  }
+
+  buildColumnNameInputList(labelId, parameterDef, onkeydown, parentElement) {
+    const indexId = ArgumentBuilder.indexIdFromLabelId(labelId);
+
+    function getOrCreateIndex(indexId) {
+      if (document.getElementById(indexId)) {
+        return document.getElementById(indexId);
+      } else {
+        const indexElement = createInput({
+        id: indexId,
+        value: 1,
+        style: {
+          display: 'none',
+          },
+        });
+        parentElement.appendChild(indexElement);
+        return indexElement;
+      }
+    }
+
+    const indexElement = getOrCreateIndex(indexId, parentElement);
+
+    const index = indexElement ? parseInt(indexElement.value) : 0;
+    const indexedLabelId = labelId + '_' + index;
+    console.info("INFO", index, indexElement.value);
+
+    const container = createDiv({});
+
+    const columnNames = createSelect({
+      id: indexedLabelId,
+      keydown: onkeydown,
+    });
+
+    for (const label of app.dataView.labels) {
+      columnNames.appendChild(createOption({
+        value: label.name,
+        text: label.name,
+        keydown: onkeydown,
+      }));
+    }
+
+    container.appendChild(columnNames);
+
+    container.appendChild(createButton({
+      cls: 'transformAddArgumentButton',
+      text: '+',
+      mousedown: e => ifPrimaryClick(e, () => {
+        const indexElement = getOrCreateIndex(indexId, parentElement);
+        indexElement.value = parseInt(indexElement.value) + 1;
+        this.buildColumnNameInputList(
+          labelId, parameterDef, onkeydown, parentElement
+        );
+      })
+    }));
+
+    container.appendChild(createButton({
+      cls: 'transformAddArgumentButton',
+      text: '-',
+      mousedown: e => ifPrimaryClick(e, () => {
+        const indexElement = getOrCreateIndex(indexId, parentElement);
+        const index = parseInt(indexElement.value);
+        if (index > 1) {
+          indexElement.value = index - 1;
+          container.parentElement.removeChild(container);
+        }
+      })
+    }));
+
+    parentElement.appendChild(container);
+  }
+
+  buildColumnNameDataListInput(labelId, parameterDef, onkeydown, parentElement) {
+    console.info('buildColumnNameInput');
+    const container = createSpan({});
+    const datalistId = 'parameterDatalist__' + parameterDef.label;
+
+    const columnNames = createDataList({id: datalistId});
+    for (const label of app.dataView.labels) {
+      columnNames.appendChild(createOption({value: label.name}));
+    }
+    container.appendChild(columnNames);
+
+    container.appendChild(createInput({
+      id: labelId,
+      type: 'text',
+      list: datalistId,
+      keydown: onkeydown,
+    }));
+
+    parentElement.appendChild(container);
+  }
+
+  buildTextInput(labelId, parameterDef, onkeydown, parentElement) {
+    const input = createInput({
+      id: labelId,
+      type: 'text',
+      keydown: onkeydown,
+    });
+
+    parentElement.appendChild(input);
   }
 }
