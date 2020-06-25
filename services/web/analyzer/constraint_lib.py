@@ -854,6 +854,7 @@ class Categorization(EnrichmentTransform):
     def type() -> str:
         return "Autocat"
 
+    @property
     def input_labels(self) -> Set[str]:
         return {self.text_column_name, self.date_column_name, self.pkey_column_name}
 
