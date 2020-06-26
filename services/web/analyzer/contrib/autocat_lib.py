@@ -6,7 +6,6 @@ from copy import deepcopy
 import math
 import logging
 
-import numpy as np
 from scipy.stats import entropy
 from pandas import DataFrame
 
@@ -333,20 +332,27 @@ class CorpusProcessor:
 
         # at each iteration, consider a time window `base` times the window of the iteration before
         # for example, when `base` is 2, the window doubles every iteration
-        for age_exponent in range(min_age_exponent, max_age_exponent + 1):
-            age = base ** age_exponent
+        for i, age_exponent in enumerate(range(min_age_exponent, max_age_exponent + 1)):
+            min_age = base ** (age_exponent - 1) + 1
+            max_age = base ** age_exponent
 
             token_counts = self._count_tokens_in_time_window(
-                max_age=age,
+                min_age=min_age,
+                max_age=max_age,
                 include_deps=include_deps,
                 exclude_words=exclude_words,
                 entry_ids=entry_ids,
             )
 
+            # ensure weights follow the pattern
+            # 2^{n}, 2^{n-1}, ..., 1
+            weight = base ** (max_age_exponent - i - 2)
+
             for token, count in token_counts.items():
                 if len(token) < min_len:
                     continue
-                weighted_token_counts[token] = base * weighted_token_counts[token] + count
+
+                weighted_token_counts[token] += weight * count
 
         return weighted_token_counts
 
@@ -370,6 +376,7 @@ class CorpusProcessor:
 
     def _count_tokens_in_time_window(
         self,
+        min_age: int,
         max_age: int,
         include_deps: Set[str],
         exclude_words: Set[str],
@@ -379,10 +386,10 @@ class CorpusProcessor:
         allowable_entry_ids = set(entry_ids or [])
 
         def is_relevant(entry: TokenEntry) -> bool:
-            return entry.age <= age and entry.dep in include_deps
+            return min_age <= entry.age <= age and entry.dep in include_deps
 
         token_counts = Counter()
-        for age in range(0, max_age + 1):
+        for age in range(min_age, max_age + 1):
             for entry_id in self._ids_by_age.get(age, []):
                 if allowable_entry_ids and entry_id not in allowable_entry_ids:
                     continue
@@ -612,7 +619,7 @@ class CorpusProcessor:
         if sorted_scored_similarities[0][0] > threshold:
             return [self.DEFAULT_PAIR]
         return [
-            (c, self.DEFAULT_SUBCATEGORY) for score, c in scored_similarities if score < threshold
+            c for score, c in scored_similarities if score < threshold
         ]
 
     def categorize_text(self, text: str) -> List[Tuple[str, str]]:
