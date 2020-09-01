@@ -117,7 +117,7 @@ version = "2.0.3"
 [[package]]
 category = "main"
 description = "English multi-task CNN trained on OntoNotes, with GloVe vectors trained on Common Crawl. Assigns word vectors, context-specific token vectors, POS tags, dependency parse and named entities."
-name = "en_core_web_sm"
+name = "en_core_web_lg"
 optional = false
 python-versions = "*"
 version = "2.2.5"
@@ -128,7 +128,8 @@ spacy = ">=2.2.2"
 [package.source]
 reference = ""
 type = "url"
-url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-2.2.5/en_core_web_sm-2.2.5.tar.gz"
+url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-2.2.5/en_core_web_lg-2.2.5.tar.gz"
+
 [[package]]
 category = "main"
 description = "A simple framework for building complex web applications."
@@ -154,7 +155,7 @@ description = "A Flask extension adding a decorator for CORS support"
 name = "flask-cors"
 optional = false
 python-versions = "*"
-version = "1.10.2"
+version = "3.0.9"
 
 [package.dependencies]
 Flask = ">=0.9"
@@ -624,7 +625,8 @@ docs = ["sphinx", "jaraco.packaging (>=3.2)", "rst.linker (>=1.9)"]
 testing = ["jaraco.itertools", "func-timeout"]
 
 [metadata]
-content-hash = "1fd4aac3e96c38175d49b9a637ee7381889a039e75886b71cca5c1e9708a9687"
+content-hash = "cf2e16bf8243c9c7242f71c93d2bc2b43cd6eb2262c9309ae332e00b4222cae5"
+lock-version = "1.0"
 python-versions = "^3.7"
 
 [metadata.files]
@@ -696,15 +698,14 @@ cymem = [
     {file = "cymem-2.0.3-cp38-cp38-win_amd64.whl", hash = "sha256:dd24848fbd75b17bab06408da6c029ba7cc615bd9e4a1f755fb3a090025fb922"},
     {file = "cymem-2.0.3.tar.gz", hash = "sha256:5083b2ab5fe13ced094a82e0df465e2dbbd9b1c013288888035e24fd6eb4ed01"},
 ]
-en_core_web_sm = []
+en_core_web_lg = []
 flask = [
     {file = "Flask-1.1.1-py2.py3-none-any.whl", hash = "sha256:45eb5a6fd193d6cf7e0cf5d8a5b31f83d5faae0293695626f539a823e93b13f6"},
     {file = "Flask-1.1.1.tar.gz", hash = "sha256:13f9f196f330c7c2c5d7a5cf91af894110ca0215ac051b5844701f2bfd934d52"},
 ]
 flask-cors = [
-    {file = "Flask-Cors-1.10.2.tar.gz", hash = "sha256:8e52160840aee8cdbde56e3f04baa02f598aac4dab2ff07f69a9b781e909bb49"},
-    {file = "Flask_Cors-1.10.2-py2-none-any.whl", hash = "sha256:9a0d7e4a060b3313966da5f89e2a2f60a78137f88af9257d9cbc7f0b8b8252bd"},
-    {file = "Flask_Cors-1.10.2-py3-none-any.whl", hash = "sha256:c65eb97560fb1868d5f128fe3bb27f8dbb3ecd18b3d9b3064773ab54d8260d46"},
+    {file = "Flask-Cors-3.0.9.tar.gz", hash = "sha256:6bcfc100288c5d1bcb1dbb854babd59beee622ffd321e444b05f24d6d58466b8"},
+    {file = "Flask_Cors-3.0.9-py2.py3-none-any.whl", hash = "sha256:cee4480aaee421ed029eaa788f4049e3e26d15b5affb6a880dade6bafad38324"},
 ]
 idna = [
     {file = "idna-2.9-py2.py3-none-any.whl", hash = "sha256:a068a21ceac8a4d63dbfd964670474107f541babbd2250d61922f029858365fa"},
@@ -905,6 +906,7 @@ regex = [
     {file = "regex-2020.2.20.tar.gz", hash = "sha256:9e9624440d754733eddbcd4614378c18713d2d9d0dc647cf9c72f64e39671be5"},
 ]
 requests = [
+    {file = "requests-2.23.0-py2.7.egg", hash = "sha256:5d2d0ffbb515f39417009a46c14256291061ac01ba8f875b90cad137de83beb4"},
     {file = "requests-2.23.0-py2.py3-none-any.whl", hash = "sha256:43999036bfa82904b6af1d99e4882b560e5e2c68e5c4b0aa03b655f3d7d73fee"},
     {file = "requests-2.23.0.tar.gz", hash = "sha256:b3f43d496c6daba4493e7c431722aeb7dbc6288f52a6e04e7b6023b0247817e6"},
 ]
